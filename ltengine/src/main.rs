@@ -10,14 +10,15 @@ use serde::{Deserialize, Serialize};
 
 mod error_response;
 mod languages;
-mod models;
-mod llm;
+mod backend;
 mod banner;
 mod prompt;
+#[cfg(test)]
+mod tests;
 
 use languages::{detect_lang, get_language_from_code, LANGUAGES};
 use error_response::ErrorResponse;
-use models::{MODELS, load_model};
+use backend::{BackendError, ProviderManager, ProviderConfig};
 use banner::print_banner;
 use prompt::PromptBuilder;
 
@@ -38,25 +39,33 @@ struct Args {
     #[arg(long, default_value_t = 5000)]
     char_limit: usize,
 
-    /// Model to use
-    #[arg(short='m', long, value_parser = MODELS.keys().collect::<Vec<_>>(), default_value = "gemma3-4b")]
+    /// Model to use (passed to the backend provider)
+    #[arg(short='m', long, default_value = "gemma3-4b")]
     model: String,
 
-    /// Path to .gguf model file
+    /// Backend host (e.g., "localhost:11434" for Ollama, or full URL like "http://ollama:11434")
+    #[arg(long, default_value = "localhost:11434")]
+    backend_host: String,
+
+    /// Set an API key (optional, for authenticating translation requests to the API)
     #[arg(long, default_value = "")]
-    model_file: String,
+    api_key: String,
 
-    /// Set an API key
-    #[arg(long, default_value = "")]
-    api_key: String,  
+    /// Set a backend API key (optional, for authenticating with the external backend)
+    #[arg(long = "backend-api-key", default_value = "")]
+    backend_api_key: String,
 
-    /// Use CPU only
-    #[arg(long)]
-    cpu: bool,
+    /// Maximum number of retry attempts for provider creation and translation requests
+    #[arg(long, default_value_t = 5)]
+    retry_attempts: usize,
 
-    /// Enable verbose logging
-    #[arg(short = 'v', long)]
-    verbose: bool
+    /// Base delay in milliseconds for exponential backoff (1000ms → 1s, 2s, 4s...)
+    #[arg(long, default_value_t = 1000)]
+    retry_delay: u64,
+
+    /// Interval in seconds for periodic model availability rechecks (0 to disable)
+    #[arg(long, default_value_t = 30)]
+    model_recheck_interval: u64
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -122,7 +131,8 @@ fn check_params(body: &TranslateRequest, args: &Args, required_params: &[(&str, 
         }
     }
     
-    // Check key
+    // Check API key: if the server has an API key configured, the request must include
+    // it. Returns 403 if the key is missing or doesn't match.
     if !args.api_key.is_empty() && body.api_key.as_ref().is_none_or(|key| *key != args.api_key) {
         return Err(ErrorResponse {
             error: format!("Invalid API key"),
@@ -214,8 +224,41 @@ fn check_format(format: &str) -> Result<bool, ErrorResponse> {
     }
 }
 
+#[get("/health")]
+async fn health() -> impl Responder {
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "service": "ltengine",
+        "version": env!("CARGO_PKG_VERSION")
+    }))
+}
+
+#[get("/health/backend")]
+async fn backend_health(provider: web::Data<Arc<ProviderManager>>) -> impl Responder {
+    let result = provider.ping().await;
+    
+    match result {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "ok",
+            "backend": "Backend is reachable"
+        })),
+        Err(e) => {
+            let err_msg = format!("{}", e);
+            HttpResponse::ServiceUnavailable().json(serde_json::json!({
+                "status": "error",
+                "backend": err_msg
+            }))
+        }
+    }
+}
+
 #[post("/translate")]
-async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<Args>>, llm: actix_web::web::Data<Arc<llm::LLM>>) -> Result<HttpResponse, ErrorResponse> {
+async fn translate(
+    req: HttpRequest,
+    payload: web::Payload,
+    args: web::Data<Arc<Args>>,
+    provider_manager: web::Data<Arc<ProviderManager>>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = parse_payload(req, payload).await?;
     check_params(&body, &args, &[
         ("q", &body.q),
@@ -232,8 +275,6 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
     let mut pb = PromptBuilder::new();
     pb.set_format(&format);
 
-    // TODO: add HTML support
-    
     if source == "auto"{
         pb.set_source_language("auto");
     }else{
@@ -250,24 +291,50 @@ async fn translate(req: HttpRequest, payload: web::Payload, args: web::Data<Arc<
     })?;
     pb.set_target_language(tgt_lang.name);
 
-    let llm = llm.get_ref();
     let prompt = pb.build(&q);
     
-    let translated_text = if source != target {
-        llm.run_prompt(prompt.system, prompt.user).map_err(|e| {
-            let status = if e.is::<llm::LLMError>() { 503 } else { 500 };
-            let msg = format!("{:#}", e);
-            eprintln!("translation error: {}", msg);
+    // If source equals target, return the original text without translating.
+    // This is a performance optimization but may be semantically unexpected.
+    let translated_text = if source == target {
+        q.clone()
+    } else {
+        provider_manager.translate(&prompt.system, &prompt.user).await.map_err(|e| {
+            eprintln!("translation error: {}", e);
+
+            // Check if the error is a BackendError with an HTTP status code or retryable
+            let (msg, status) = if let Some(backend_err) = e.downcast_ref::<BackendError>() {
+                match backend_err {
+                    BackendError::Http { status_code, detail: _ } => {
+                        // Don't leak backend details, use generic message
+                        let http_status = match *status_code {
+                            401 => 403,  // Forbidden (authentication failed)
+                            404 => 404,  // Model not found
+                            _ => 503,    // Other server errors → 503
+                        };
+                        (format!("Backend returned {}", status_code), http_status)
+                    }
+                    BackendError::Retryable(_) => {
+                        // Should not happen in normal operation (ProviderManager handles retries),
+                        // but if it does, return a service unavailable error
+                        ("Backend temporarily unavailable".to_string(), 503)
+                    }
+                    BackendError::Other(_) => {
+                        // Other backend errors (parsing, empty response) — 500
+                        ("Backend error".to_string(), 500)
+                    }
+                }
+            } else {
+                // Generic error (e.g., model not available)
+                (format!("{:#}", e), 500)
+            };
+
             ErrorResponse { error: msg, status }
         })?
-    } else {
-        q.clone()
     };
     
     let mut response = serde_json::json!({"translatedText": improve_formatting(&q, &translated_text)});
 
-    // TODO: we just add this for compatibility for now
-    // we should allow multiple alternatives to be generated
+    // For compatibility with LibreTranslate API
     if body.alternatives.is_some_and(|v| v > 0) {
         response["alternatives"] = serde_json::json!([]);
     }
@@ -334,29 +401,49 @@ async fn main() -> std::io::Result<()> {
     let host = args.host.clone();
     let port = args.port;
 
-    let model_path = load_model(&args.model, &args.model_file).unwrap_or_else(|err| {
-        eprintln!("Failed to load model: {}", err);
-        std::process::exit(1);
-    });
-    
-    println!("Loading model: {}", model_path.display());
+    // Create translation provider (OpenAI-compatible backend) with retry logic
+    // Server-side API key is used for authenticating incoming translation requests.
+    // Backend API key is sent to the external backend for authentication.
+    let backend_api_key = if args.backend_api_key.is_empty() { None } else { Some(args.backend_api_key.as_str()) };
+    let provider_config = ProviderConfig {
+        max_attempts: args.retry_attempts,
+        base_delay_ms: args.retry_delay,
+        recheck_interval_secs: args.model_recheck_interval,
+    };
+    let provider_manager = Arc::new(ProviderManager::new(
+        &args.backend_host,
+        &args.model,
+        backend_api_key,
+        provider_config,
+    ));
 
-    let llm = Arc::new(llm::LLM::new(model_path, args.cpu, args.verbose).unwrap_or_else(|err| {
-        eprintln!("Failed to initialize LLM: {}", err);
-        std::process::exit(1);
-    }));
+    // Initialize the provider with retry (non-blocking if backend isn't ready yet)
+    provider_manager.initialize().await;
+
+    // Start periodic rechecker if enabled
+    if args.model_recheck_interval > 0 {
+        provider_manager.start_rechecker();
+    }
 
     print_banner();
+
+    let backend_host = args.backend_host.clone();
+    let model = args.model.clone();
+    let retry_attempts = args.retry_attempts;
+    let retry_delay = args.retry_delay;
+
+    let args = Arc::clone(&args);
 
     let server = HttpServer::new(move || {
         let generated = generate();
 
         App::new()
-            // .service(index)
-            .app_data(web::Data::new(llm.clone()))
+            .app_data(web::Data::new(provider_manager.clone()))
             .app_data(web::Data::new(args.clone()))
             .service(get_languages)
             .service(get_frontend_settings)
+            .service(health)
+            .service(backend_health)
             .service(translate)
             .service(translate_file)
             .service(detect)
@@ -367,6 +454,10 @@ async fn main() -> std::io::Result<()> {
     .run();
 
     println!("Running on: http://{}:{}", host, port);
+    println!("Using backend: {} (model: {})", backend_host, model);
+    println!("Health endpoints: GET /health (service), GET /health/backend (backend status)");
+    println!("Provider will retry {} times with base delay {}ms for transient errors",
+             retry_attempts, retry_delay);
 
     return server.await;
 }

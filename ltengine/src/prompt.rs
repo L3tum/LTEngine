@@ -1,9 +1,11 @@
+#[derive(Debug)]
 pub struct PromptBuilder{
     source_language: &'static str,
     target_language: &'static str,
     format: String,
 }
 
+#[derive(Debug)]
 pub struct Prompt{
     pub system: String,
     pub user: String
