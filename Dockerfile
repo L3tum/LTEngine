@@ -26,9 +26,9 @@ FROM scratch
 
 COPY --from=builder /ltengine /ltengine
 
-ENV BACKEND_HOST=localhost:11434
-ENV MODEL=gemma3-4b
+ENV LTE_BACKEND_HOST=localhost:11434
+ENV LTE_MODEL=gemma3-4b
 
 EXPOSE 5050
 
-CMD ["ltengine", "--host", "0.0.0.0", "-m", "${MODEL}", "--backend-host", "${BACKEND_HOST}"]
+CMD ["ltengine"]

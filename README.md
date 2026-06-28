@@ -10,8 +10,9 @@ The LLMs in LTEngine are much larger than the lightweight transformer models in 
 
 > 💡 **Migration from llama.cpp version:** Previous versions of LTEngine ran llama.cpp directly (with GPU layer offloading). This version uses an external backend (Ollama, vLLM, etc.) via the OpenAI-compatible API. Models must now be loaded on the backend side. To upgrade:
 > 1. Set up an external inference server (e.g., `ollama pull gemma3-4b`)
-> 2. Run `ltengine --backend-host localhost:11434 -m gemma3-4b`
-> 3. The old `--model-file` and `--cpu` options are removed — the backend handles GPU/CPU decisions.
+> 2. Run with CLI: `ltengine --backend-host localhost:11434 -m gemma3-4b`
+> 3. Or via environment variables: `export LTE_BACKEND_HOST=localhost:11434 LTE_MODEL=gemma3-4b && ltengine`
+> 4. The old `--model-file` and `--cpu` options are removed — the backend handles GPU/CPU decisions.
 
 ## Requirements
 
@@ -172,11 +173,32 @@ If the backend becomes unreachable during operation:
   --char-limit 5000
 ```
 
-- `--api-key`: Require this key on incoming translation requests (for server-side authentication)
-- `--backend-api-key`: API key to send to the external backend (as Bearer token, for backend authentication)
-- `--retry-attempts`: Maximum number of retry attempts for provider creation and translation requests (default: 5)
-- `--retry-delay`: Base delay in milliseconds for exponential backoff (default: 1000ms → 1s, 2s, 4s, 8s...)
-- `--model-recheck-interval`: Interval in seconds for periodic model availability rechecks. Set to 0 to disable (default: 30).
+All CLI options can also be configured via environment variables (with CLI arguments taking precedence over environment variables):
+
+| CLI Option | Environment Variable | Description | Default |
+|------------|----------------------|-------------|---------|
+| `--host` | `LTE_HOST` | Hostname to bind the server to | `0.0.0.0` |
+| `--port` | `LTE_PORT` | Port to bind the server to | `5050` |
+| `--model` | `LTE_MODEL` | Model name to use (passed to the backend) | `gemma3-4b` |
+| `--backend-host` | `LTE_BACKEND_HOST` | Backend server address (host:port or full URL) | `localhost:11434` |
+| `--api-key` | `LTE_API_KEY` | Require this API key on incoming translation requests | *(none)* |
+| `--backend-api-key` | `LTE_BACKEND_API_KEY` | API key to send to the external backend as Bearer token | *(none)* |
+| `--retry-attempts` | `LTE_RETRY_ATTEMPTS` | Max retry attempts for provider creation and translation | `5` |
+| `--retry-delay` | `LTE_RETRY_DELAY` | Base delay in ms for exponential backoff | `1000` |
+| `--model-recheck-interval` | `LTE_MODEL_RECHECK_INTERVAL` | Seconds between periodic model availability rechecks (0 to disable) | `30` |
+| `--char-limit` | `LTE_CHAR_LIMIT` | Maximum character limit for translation requests | `5000` |
+
+### Environment Variables Example
+
+You can configure LTEngine entirely via environment variables (useful for Docker/containerized deployments):
+
+```bash
+export LTE_BACKEND_HOST="ollama:11434"
+export LTE_MODEL="gemma3-4b"
+export LTE_PORT="5050"
+export LTE_API_KEY="my-secret-key"
+./target/release/ltengine
+```
 
 ## Language Bindings
 

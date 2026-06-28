@@ -7,8 +7,8 @@ services:
     ports:
       - "127.0.0.1:5050:5050"
     environment:
-      MODEL: gemma3-4b  # use any model available on your backend
-      BACKEND_HOST: ollama:11434
+      LTE_MODEL: gemma3-4b  # use any model available on your backend
+      LTE_BACKEND_HOST: ollama:11434
 
   # Optional: Ollama service for model serving, use any service you want that exposes an OpenAI-compatible API
   # Uncomment to run Ollama in the same compose

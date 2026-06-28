@@ -27,44 +27,44 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Hostname to bind to
-    #[arg(long, default_value = "0.0.0.0")]
+    /// Hostname to bind to (env var: LTE_HOST)
+    #[arg(long, env = "LTE_HOST", default_value = "0.0.0.0")]
     host: String,
 
-    /// Port to bind to
-    #[arg(short, long, default_value_t = 5050)]
+    /// Port to bind to (env var: LTE_PORT)
+    #[arg(short, long, env = "LTE_PORT", default_value_t = 5050)]
     port: u16,
 
-    /// Character limit for translation requests
-    #[arg(long, default_value_t = 5000)]
+    /// Character limit for translation requests (env var: LTE_CHAR_LIMIT)
+    #[arg(long, env = "LTE_CHAR_LIMIT", default_value_t = 5000)]
     char_limit: usize,
 
-    /// Model to use (passed to the backend provider)
-    #[arg(short='m', long, default_value = "gemma3-4b")]
+    /// Model to use (passed to the backend provider) (env var: LTE_MODEL)
+    #[arg(short='m', long, env = "LTE_MODEL", default_value = "gemma3-4b")]
     model: String,
 
-    /// Backend host (e.g., "localhost:11434" for Ollama, or full URL like "http://ollama:11434")
-    #[arg(long, default_value = "localhost:11434")]
+    /// Backend host (e.g., "localhost:11434" for Ollama, or full URL like "http://ollama:11434") (env var: LTE_BACKEND_HOST)
+    #[arg(long, env = "LTE_BACKEND_HOST", default_value = "localhost:11434")]
     backend_host: String,
 
-    /// Set an API key (optional, for authenticating translation requests to the API)
-    #[arg(long, default_value = "")]
+    /// Set an API key (optional, for authenticating translation requests to the API) (env var: LTE_API_KEY)
+    #[arg(long, env = "LTE_API_KEY", default_value = "")]
     api_key: String,
 
-    /// Set a backend API key (optional, for authenticating with the external backend)
-    #[arg(long = "backend-api-key", default_value = "")]
+    /// Set a backend API key (optional, for authenticating with the external backend) (env var: LTE_BACKEND_API_KEY)
+    #[arg(long = "backend-api-key", env = "LTE_BACKEND_API_KEY", default_value = "")]
     backend_api_key: String,
 
-    /// Maximum number of retry attempts for provider creation and translation requests
-    #[arg(long, default_value_t = 5)]
+    /// Maximum number of retry attempts for provider creation and translation requests (env var: LTE_RETRY_ATTEMPTS)
+    #[arg(long, env = "LTE_RETRY_ATTEMPTS", default_value_t = 5)]
     retry_attempts: usize,
 
-    /// Base delay in milliseconds for exponential backoff (1000ms → 1s, 2s, 4s...)
-    #[arg(long, default_value_t = 1000)]
+    /// Base delay in milliseconds for exponential backoff (1000ms → 1s, 2s, 4s...) (env var: LTE_RETRY_DELAY)
+    #[arg(long, env = "LTE_RETRY_DELAY", default_value_t = 1000)]
     retry_delay: u64,
 
-    /// Interval in seconds for periodic model availability rechecks (0 to disable)
-    #[arg(long, default_value_t = 30)]
+    /// Interval in seconds for periodic model availability rechecks (0 to disable) (env var: LTE_MODEL_RECHECK_INTERVAL)
+    #[arg(long, env = "LTE_MODEL_RECHECK_INTERVAL", default_value_t = 30)]
     model_recheck_interval: u64
 }
 
