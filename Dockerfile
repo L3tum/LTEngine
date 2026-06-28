@@ -3,17 +3,12 @@
 # Build with musl for a fully static binary (no dynamic libc dependencies)
 FROM rust:1.96 AS builder
 
-<<<<<<< Updated upstream
-# Add the musl target so we can build a static binary
-RUN rustup target add x86_64-unknown-linux-musl
-=======
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install musl target and the musl-gcc compiler needed by ring
 RUN rustup target add x86_64-unknown-linux-musl \
     && apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && rm -rf /var/lib/apt/lists/*
->>>>>>> Stashed changes
 
 WORKDIR /build
 

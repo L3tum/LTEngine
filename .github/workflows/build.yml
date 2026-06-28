@@ -2,7 +2,9 @@ name: Build and Test
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -17,17 +19,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup default stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
 
       - name: Build
-        run: cargo build --release
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --release
 
       - name: Run Tests
-        run: cargo test
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubuntu
-          path: target/release/*
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test
