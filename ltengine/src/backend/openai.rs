@@ -129,7 +129,8 @@ impl OpenAiProvider {
                         continue;
                     }
 
-                    // Return Retryable error so ProviderManager knows it can recreate the provider
+                    // After max retries exhausted, return Retryable error so ProviderManager
+                    // will drop the provider on permanent detection, then recreate on next request.
                     if is_retryable {
                         return Err(BackendError::Retryable(e.to_string()).into());
                     }
@@ -204,6 +205,8 @@ impl OpenAiProvider {
         let health_url = format!("{}/health", self.base_url);
         if let Ok(resp) = self.client.get(&health_url).send().await {
             if resp.status().is_success() {
+                // Rate-limit this warning: only log once per 10 seconds
+                static_last_model_enum_warning_check(&format!("{}:{}", self.base_url, self.model));
                 eprintln!("Warning: backend at {} is reachable but model enumeration failed, assuming model '{}' is available",
                           self.base_url, self.model);
                 return Ok(Vec::new()); // backend reachable but we couldn't enumerate models
@@ -212,6 +215,23 @@ impl OpenAiProvider {
 
         Err(anyhow::anyhow!("Backend at {} is not reachable", self.base_url))
     }
+}
+
+/// Helper to rate-limit the model enumeration warning.
+/// Logs at most once every 10 seconds per backend URL.
+static LAST_MODEL_ENUM_WARN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
+
+fn static_last_model_enum_warning_check(key: &str) {
+    let map = LAST_MODEL_ENUM_WARN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let now = std::time::Instant::now();
+    let mut map = map.lock().unwrap();
+    if let Some(&last) = map.get(key) {
+        if now.duration_since(last) < std::time::Duration::from_secs(10) {
+            // Too soon, skip
+            return;
+        }
+    }
+    map.insert(key.to_string(), now);
 }
 
 #[async_trait::async_trait]

@@ -31,8 +31,10 @@ pub use openai::OpenAiProvider;
 /// An error from the backend that may carry an HTTP status code and retryability hint.
 #[derive(Debug)]
 pub enum BackendError {
-    /// Backend returned an HTTP error status (e.g., 401, 404). Not retryable.
+    /// Backend returned an HTTP error status (e.g., 401). Not retryable.
     Http { status_code: u16, detail: String },
+    /// Model is not available on the backend (should return 404). Not retryable.
+    ModelNotFound(String),
     /// Other error (parsing, empty response). Not retryable.
     Other(String),
     /// Network-level or timeout error that can be retried (connection refused, timeout, etc.).
@@ -45,6 +47,7 @@ impl std::fmt::Display for BackendError {
             BackendError::Http { status_code, .. } => {
                 write!(f, "Backend HTTP error {}", status_code)
             }
+            BackendError::ModelNotFound(msg) => write!(f, "{}", msg),
             BackendError::Other(msg) => write!(f, "{}", msg),
             BackendError::Retryable(msg) => write!(f, "{}", msg),
         }
@@ -89,9 +92,13 @@ pub trait TranslateProvider: Send + Sync {
 /// A wrapper around a `TranslateProvider` that supports retry logic and periodic
 /// model availability rechecking. If the provider becomes unreachable, subsequent
 /// requests will attempt to recreate it (once the backend comes back online).
+///
+/// Uses a creation guard to prevent thundering herd problems when multiple requests
+/// arrive simultaneously with no provider available.
 #[derive(Clone)]
 pub struct ProviderManager {
     provider: Arc<RwLock<Option<Arc<dyn TranslateProvider>>>>,
+    creation_guard: Arc<tokio::sync::Mutex<()>>,
     host: String,
     model: String,
     api_key: Option<String>,
@@ -104,6 +111,7 @@ impl ProviderManager {
     pub fn new(host: &str, model: &str, api_key: Option<&str>, config: ProviderConfig) -> Self {
         Self {
             provider: Arc::new(RwLock::new(None)),
+            creation_guard: Arc::new(tokio::sync::Mutex::new(())),
             host: host.to_string(),
             model: model.to_string(),
             api_key: api_key.map(String::from),
@@ -212,8 +220,9 @@ impl ProviderManager {
                     eprintln!("Model '{}' not available. Available models: {:?}",
                               self.model, models);
                     return Err(anyhow!(
-                        "Model '{}' not available. Available models: {:?}",
-                        self.model, models
+                        BackendError::ModelNotFound(
+                            format!("Model '{}' not available. Available models: {:?}", self.model, models)
+                        )
                     ));
                 }
                 ModelAvailability::Unreachable => {
@@ -256,9 +265,9 @@ impl ProviderManager {
     ///
     /// The provider's own `translate_with_config` handles retry with max attempts,
     /// so we don't add a wrapper retry loop. On transient (retryable) errors we
-    /// keep the provider alive - the next request might succeed. On permanent errors
-    /// (auth failure, model not found) we drop the provider so the rechecker can
-    /// attempt recovery.
+    /// drop the provider - the next request will trigger a new creation attempt.
+    /// On permanent errors (auth failure, model not found) we also drop the provider
+    /// so the rechecker can attempt recovery.
     pub async fn translate(&self, system: &str, user: &str) -> Result<String> {
         let provider = {
             let provider_guard = self.provider.read().await;
@@ -269,30 +278,62 @@ impl ProviderManager {
             match provider.translate(system, user, &self.config).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    let is_permanent = e.downcast_ref::<BackendError>()
-                        .map(|be| !matches!(be, BackendError::Retryable(_)))
-                        .unwrap_or(false);
-
-                    if is_permanent {
-                        // Drop provider so future requests trigger a recreation
-                        eprintln!("Permanent provider error, dropping provider");
-                        let mut provider_guard = self.provider.write().await;
-                        *provider_guard = None;
-                    }
+                    // On any error, drop the provider so the next request will try to create
+                    // a new one. For Retryable errors, the provider's own retry loop has
+                    // already exhausted all retries, so the provider is dead and needs
+                    // recreation. For permanent errors (401, 404), we also drop it.
+                    eprintln!("Translation error, dropping provider: {}", e);
+                    let mut provider_guard = self.provider.write().await;
+                    *provider_guard = None;
                     Err(e)
                 }
             }
         } else {
-            // No provider, try to create one with retry
+            // No provider, try to create one. Use creation_guard to prevent thundering herd.
+            // Wait up to 2 seconds for another request to finish creating the provider.
+            let guard_result = tokio::time::timeout(
+                Duration::from_secs(2),
+                self.creation_guard.lock(),
+            ).await;
+
+            let _guard = match guard_result {
+                Ok(guard) => guard,
+                Err(_) => {
+                    // Timeout: another request is currently creating the provider.
+                    // Wait a moment and check again.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let provider_guard = self.provider.read().await;
+                    if let Some(provider) = provider_guard.clone() {
+                        // Provider was created while we were waiting
+                        return provider.translate(system, user, &self.config).await;
+                    }
+                    return Err(anyhow!("Could not create provider in time, backend may be unreachable"));
+                }
+            };
+
+            // Double-check: another request might have created the provider while we waited
+            {
+                let provider_guard = self.provider.read().await;
+                if let Some(provider) = provider_guard.clone() {
+                    return provider.translate(system, user, &self.config).await;
+                }
+            }
+
+            // Create the provider with retry
             eprintln!("No provider available, attempting to create...");
             let new_provider = self.create_with_retry().await?;
-            let mut provider_guard = self.provider.write().await;
-            *provider_guard = Some(new_provider);
+            {
+                let mut provider_guard = self.provider.write().await;
+                *provider_guard = Some(new_provider);
+            }
             // Translate with the new provider (its own retry logic applies)
-            if let Some(provider) = &*provider_guard {
-                provider.translate(system, user, &self.config).await
-            } else {
-                Err(anyhow!("Provider became unavailable after creation"))
+            {
+                let provider_guard = self.provider.read().await;
+                if let Some(provider) = provider_guard.clone() {
+                    provider.translate(system, user, &self.config).await
+                } else {
+                    Err(anyhow!("Provider became unavailable after creation"))
+                }
             }
         }
     }

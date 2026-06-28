@@ -132,12 +132,22 @@ fn check_params(body: &TranslateRequest, args: &Args, required_params: &[(&str, 
     }
     
     // Check API key: if the server has an API key configured, the request must include
-    // it. Returns 403 if the key is missing or doesn't match.
-    if !args.api_key.is_empty() && body.api_key.as_ref().is_none_or(|key| *key != args.api_key) {
-        return Err(ErrorResponse {
-            error: format!("Invalid API key"),
-            status: 403,
-        });
+    // it. Returns 403 if the key is missing or doesn't match. Uses constant-time comparison
+    // to prevent timing attacks.
+    if !args.api_key.is_empty() {
+        let key_matches = body.api_key
+            .as_ref()
+            .map(|key| {
+                // Use constant-time comparison to prevent timing attacks
+                subtle::ConstantTimeEq::ct_eq(key.as_bytes(), args.api_key.as_bytes()).into()
+            })
+            .unwrap_or(false);
+        if !key_matches {
+            return Err(ErrorResponse {
+                error: "Invalid API key".to_string(),
+                status: 403,
+            });
+        }
     }
 
     let q = body.q.as_ref().unwrap();
@@ -313,9 +323,13 @@ async fn translate(
                         };
                         (format!("Backend returned {}", status_code), http_status)
                     }
+                    BackendError::ModelNotFound(msg) => {
+                        // Model not available on the backend — return 404
+                        (msg.clone(), 404)
+                    }
                     BackendError::Retryable(_) => {
-                        // Should not happen in normal operation (ProviderManager handles retries),
-                        // but if it does, return a service unavailable error
+                        // ProviderManager dropped the provider after max retries.
+                        // The next request will trigger a new creation attempt.
                         ("Backend temporarily unavailable".to_string(), 503)
                     }
                     BackendError::Other(_) => {
@@ -324,8 +338,8 @@ async fn translate(
                     }
                 }
             } else {
-                // Generic error (e.g., model not available)
-                (format!("{:#}", e), 500)
+                // Generic error (e.g., creation failed after max retries) — 503
+                (format!("{}", e), 503)
             };
 
             ErrorResponse { error: msg, status }
@@ -434,6 +448,9 @@ async fn main() -> std::io::Result<()> {
 
     let args = Arc::clone(&args);
 
+    // Clone provider_manager before moving into closure
+    let provider_manager_for_shutdown = provider_manager.clone();
+
     let server = HttpServer::new(move || {
         let generated = generate();
 
@@ -459,5 +476,14 @@ async fn main() -> std::io::Result<()> {
     println!("Provider will retry {} times with base delay {}ms for transient errors",
              retry_attempts, retry_delay);
 
-    return server.await;
+    // Run server with graceful shutdown on SIGINT/SIGTERM
+    tokio::select! {
+        _ = server => {},
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("Shutting down...");
+            provider_manager_for_shutdown.shutdown();
+        }
+    }
+
+    Ok(())
 }
