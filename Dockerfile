@@ -31,4 +31,4 @@ ENV LTE_MODEL=gemma3-4b
 
 EXPOSE 5050
 
-CMD ["ltengine"]
+CMD ["/ltengine"]
