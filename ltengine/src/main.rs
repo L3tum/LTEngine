@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 mod backend;
 mod banner;
+mod detection;
 mod error_response;
 mod languages;
 mod prompt;
@@ -19,8 +20,9 @@ mod tests;
 
 use backend::{BackendError, ProviderConfig, ProviderManager};
 use banner::print_banner;
+use detection::create_detector;
 use error_response::ErrorResponse;
-use languages::{LANGUAGES, detect_lang, get_language_from_code};
+use languages::{LANGUAGES, get_language_from_code};
 use prompt::PromptBuilder;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -75,6 +77,10 @@ struct Args {
     /// Interval in seconds for periodic model availability rechecks (0 to disable) (env var: LTE_MODEL_RECHECK_INTERVAL)
     #[arg(long, env = "LTE_MODEL_RECHECK_INTERVAL", default_value_t = 30)]
     model_recheck_interval: u64,
+
+    /// Enable language detection via LLM (env var: LTE_LLM_DETECT)
+    #[arg(long = "llm-detect", env = "LTE_LLM_DETECT", action)]
+    llm_detect: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -124,36 +130,6 @@ impl QueryText {
             Value::Array(Vec::new())
         }
     }
-
-    fn shaped_detected_language(&self) -> Value {
-        if self.is_batch() {
-            Value::Array(
-                self.as_slice()
-                    .iter()
-                    .map(|q| detected_language_json(q))
-                    .collect(),
-            )
-        } else {
-            detected_language_json(&self.as_slice()[0])
-        }
-    }
-
-    fn detection_response(&self) -> Value {
-        Value::Array(
-            self.as_slice()
-                .iter()
-                .map(|q| detected_language_json(q))
-                .collect(),
-        )
-    }
-}
-
-fn detected_language_json(q: &str) -> Value {
-    let d = detect_lang(q);
-    serde_json::json!({
-        "language": d.language.code,
-        "confidence": d.confidence
-    })
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -349,13 +325,36 @@ async fn detect(
     req: HttpRequest,
     payload: web::Payload,
     args: web::Data<Arc<Args>>,
+    provider_manager: Option<web::Data<Arc<ProviderManager>>>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = parse_payload(req, payload).await?;
     check_params(&body, &args, &[])?;
 
     let q = body.q.as_ref().expect("q was validated by check_params");
 
-    Ok(HttpResponse::Ok().json(q.detection_response()))
+    let detector = if args.llm_detect {
+        if let Some(pm) = provider_manager {
+            create_detector(&args, &pm)
+        } else {
+            return Err(ErrorResponse {
+                error: "Provider manager not available; cannot use LLM detection".to_string(),
+                status: 500,
+            });
+        }
+    } else {
+        Box::new(detection::WhatlangDetector)
+    };
+
+    let mut results = Vec::new();
+    for text in q.as_slice() {
+        let d = detector.detect(text).await;
+        results.push(serde_json::json!({
+            "language": d.language.code,
+            "confidence": d.confidence,
+        }));
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::Value::Array(results)))
 }
 
 fn check_format(format: &str) -> Result<bool, ErrorResponse> {
@@ -484,28 +483,53 @@ async fn translate(
     let format = body.format.as_deref().unwrap_or("text");
     check_format(format)?;
 
+    let tgt_lang = get_language_from_code(target).ok_or_else(|| ErrorResponse {
+        error: format!("{} is not supported", target),
+        status: 400,
+    })?;
+
     let mut pb = PromptBuilder::new();
     pb.set_format(format);
+    pb.set_target_language(tgt_lang.name);
+
+    let mut translated_texts = Vec::with_capacity(q.as_slice().len());
+    let mut detected_languages = Vec::with_capacity(q.as_slice().len());
 
     if source == "auto" {
-        pb.set_source_language("auto");
+        // Use LLM-based detection if enabled, otherwise fall back to whatlang.
+        // We detect language first, then translate with the detected language.
+        let detector = create_detector(&args, &provider_manager);
+
+        for text in q.as_slice() {
+            let detected = detector.detect(text).await;
+
+            pb.set_source_language(detected.language.name);
+            detected_languages.push(detected.clone());
+
+            translated_texts.push(
+                translate_one(
+                    text,
+                    detected.language.internal_code,
+                    target,
+                    &pb,
+                    &provider_manager,
+                )
+                .await?,
+            );
+        }
     } else {
+        // Source is explicitly specified, use whatlang for detection response if requested
         let src_lang = get_language_from_code(source).ok_or_else(|| ErrorResponse {
             error: format!("{} is not supported", source),
             status: 400,
         })?;
         pb.set_source_language(src_lang.name);
-    }
 
-    let tgt_lang = get_language_from_code(target).ok_or_else(|| ErrorResponse {
-        error: format!("{} is not supported", target),
-        status: 400,
-    })?;
-    pb.set_target_language(tgt_lang.name);
-
-    let mut translated_texts = Vec::with_capacity(q.as_slice().len());
-    for text in q.as_slice() {
-        translated_texts.push(translate_one(text, source, target, &pb, &provider_manager).await?);
+        for text in q.as_slice() {
+            translated_texts.push(
+                translate_one(text, source, target, &pb, &provider_manager).await?,
+            );
+        }
     }
 
     let mut response =
@@ -517,7 +541,24 @@ async fn translate(
     }
 
     if source == "auto" {
-        response["detectedLanguage"] = q.shaped_detected_language();
+        // Build detectedLanguage from our detected languages (LLM or whatlang fallback)
+        let detected_lang_array = if q.is_batch() {
+            serde_json::Value::Array(
+                detected_languages
+                    .iter()
+                    .map(|d| serde_json::json!({
+                        "language": d.language.code,
+                        "confidence": d.confidence
+                    }))
+                    .collect(),
+            )
+        } else {
+            serde_json::json!({
+                "language": detected_languages[0].language.code,
+                "confidence": detected_languages[0].confidence
+            })
+        };
+        response["detectedLanguage"] = detected_lang_array;
     }
 
     Ok(HttpResponse::Ok().json(response))

@@ -61,4 +61,18 @@ impl PromptBuilder {
 
         Prompt { system, user }
     }
+
+    /// Build a detection prompt for LLM-based language detection.
+    /// The LLM will receive a short system prompt to output the detected language
+    /// and a confidence score (0-100).
+    pub fn build_detect_prompt(&self, text: &str) -> Prompt {
+        let system = "You are a language detector. Output ONLY the detected language name or code and a confidence score from 0 to 100. Do not provide explanations, reasoning, or any other text.".to_string();
+
+        let user = format!(
+            "Detect the language of the following text. Respond with the language name or code (e.g. English, French, de, en) followed by a confidence score from 0 to 100. Use this format: <language> <score>\n\nText: {}",
+            text
+        );
+
+        Prompt { system, user }
+    }
 }

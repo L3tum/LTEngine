@@ -118,6 +118,7 @@ pub fn get_language_from_code(code: &String) -> Option<&'static Language> {
     LANGUAGES_MAP.get(internal_code).map(|v| &**v)
 }
 
+#[derive(Clone)]
 pub struct LangDetect {
     pub language: &'static Language,
     pub confidence: i32,
