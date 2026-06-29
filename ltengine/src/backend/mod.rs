@@ -7,11 +7,11 @@
 //! re-checking of model availability.
 
 use anyhow::{Result, anyhow};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use std::time::Duration;
 
 /// Result of checking model availability on the backend.
 enum ModelAvailability {
@@ -120,6 +120,20 @@ impl ProviderManager {
         }
     }
 
+    /// Create a manager around a supplied provider for tests.
+    #[cfg(test)]
+    pub fn from_provider(provider: Arc<dyn TranslateProvider>, config: ProviderConfig) -> Self {
+        Self {
+            provider: Arc::new(RwLock::new(Some(provider))),
+            creation_guard: Arc::new(tokio::sync::Mutex::new(())),
+            host: String::new(),
+            model: String::new(),
+            api_key: None,
+            config,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// Check if the backend is reachable and the model is available.
     /// Returns a detailed status so the caller can decide what to do.
     async fn check_model_available(&self) -> ModelAvailability {
@@ -128,7 +142,9 @@ impl ProviderManager {
 
         if let Ok(models) = available_models {
             if !models.is_empty() {
-                let model_available = models.iter().any(|m| m == &self.model || m.starts_with(&format!("{}:", self.model)));
+                let model_available = models
+                    .iter()
+                    .any(|m| m == &self.model || m.starts_with(&format!("{}:", self.model)));
                 if model_available {
                     ModelAvailability::Available
                 } else {
@@ -182,11 +198,17 @@ impl ProviderManager {
                 let mut provider_guard = self.provider.write().await;
                 let old = provider_guard.replace(new_provider);
                 if old.is_none() {
-                    eprintln!("Provider recreated, model '{}' is now available", self.model);
+                    eprintln!(
+                        "Provider recreated, model '{}' is now available",
+                        self.model
+                    );
                 }
             }
             ModelAvailability::ModelNotFound(models) => {
-                eprintln!("Warning: model '{}' not available, available models: {:?}", self.model, models);
+                eprintln!(
+                    "Warning: model '{}' not available, available models: {:?}",
+                    self.model, models
+                );
             }
             ModelAvailability::Unreachable => {
                 // Backend not reachable — nothing to do
@@ -212,18 +234,22 @@ impl ProviderManager {
                     return Ok(Arc::new(provider));
                 }
                 ModelAvailability::EnumerationFailed => {
-                    eprintln!("Warning: backend is reachable but no models were enumerated, assuming model '{}' is available", self.model);
+                    eprintln!(
+                        "Warning: backend is reachable but no models were enumerated, assuming model '{}' is available",
+                        self.model
+                    );
                     return Ok(Arc::new(provider));
                 }
                 ModelAvailability::ModelNotFound(models) => {
                     // Model not available — this is NOT retryable, return error
-                    eprintln!("Model '{}' not available. Available models: {:?}",
-                              self.model, models);
-                    return Err(anyhow!(
-                        BackendError::ModelNotFound(
-                            format!("Model '{}' not available. Available models: {:?}", self.model, models)
-                        )
-                    ));
+                    eprintln!(
+                        "Model '{}' not available. Available models: {:?}",
+                        self.model, models
+                    );
+                    return Err(anyhow!(BackendError::ModelNotFound(format!(
+                        "Model '{}' not available. Available models: {:?}",
+                        self.model, models
+                    ))));
                 }
                 ModelAvailability::Unreachable => {
                     // Backend unreachable — retryable, fall through to delay loop
@@ -231,16 +257,18 @@ impl ProviderManager {
             }
 
             if attempt < max_attempts {
-                let delay = Duration::from_millis(
-                    self.config.base_delay_ms * 2u64.pow(attempt as u32 - 1)
+                let delay =
+                    Duration::from_millis(self.config.base_delay_ms * 2u64.pow(attempt as u32 - 1));
+                eprintln!(
+                    "Failed to create provider (attempt {}/{}), retrying in {:?}...",
+                    attempt, max_attempts, delay
                 );
-                eprintln!("Failed to create provider (attempt {}/{}), retrying in {:?}...",
-                          attempt, max_attempts, delay);
                 sleep(delay).await;
             } else {
                 return Err(anyhow!(
                     "Failed to create provider after {} attempts. Backend may be unreachable or model '{}' not available.",
-                    max_attempts, self.model
+                    max_attempts,
+                    self.model
                 ));
             }
         }
@@ -255,7 +283,9 @@ impl ProviderManager {
             *provider_guard = Some(provider);
             eprintln!("Provider initialized successfully");
         } else {
-            eprintln!("Initial provider creation failed, will retry on first request or periodically");
+            eprintln!(
+                "Initial provider creation failed, will retry on first request or periodically"
+            );
             // The provider will be None until it's successfully created
         }
     }
@@ -291,10 +321,8 @@ impl ProviderManager {
         } else {
             // No provider, try to create one. Use creation_guard to prevent thundering herd.
             // Wait up to 2 seconds for another request to finish creating the provider.
-            let guard_result = tokio::time::timeout(
-                Duration::from_secs(2),
-                self.creation_guard.lock(),
-            ).await;
+            let guard_result =
+                tokio::time::timeout(Duration::from_secs(2), self.creation_guard.lock()).await;
 
             let _guard = match guard_result {
                 Ok(guard) => guard,
@@ -307,7 +335,9 @@ impl ProviderManager {
                         // Provider was created while we were waiting
                         return provider.translate(system, user, &self.config).await;
                     }
-                    return Err(anyhow!("Could not create provider in time, backend may be unreachable"));
+                    return Err(anyhow!(
+                        "Could not create provider in time, backend may be unreachable"
+                    ));
                 }
             };
 
@@ -352,7 +382,8 @@ impl ProviderManager {
             // If ping fails with a non-retryable error (auth failure, etc.),
             // drop the provider so future requests trigger a recreation attempt.
             if let Err(e) = &result {
-                let is_permanent = e.downcast_ref::<BackendError>()
+                let is_permanent = e
+                    .downcast_ref::<BackendError>()
                     .map(|be| !matches!(be, BackendError::Retryable(_)))
                     .unwrap_or(false);
 

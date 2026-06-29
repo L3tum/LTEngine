@@ -88,6 +88,18 @@ Response:
 }
 ```
 
+For JSON requests, `q` can also be an array of strings for LibreTranslate-compatible batch translation:
+
+```javascript
+{
+    "q": ["Hello!", "Goodbye!"],
+    "source": "en",
+    "target": "es"
+}
+```
+
+The response keeps the same shape, but `translatedText` becomes an array. When `source` is `"auto"`, `detectedLanguage` is also returned as an array. Batch requests accept up to 50 strings by default; configure this with `--batch-limit` / `LTE_BATCH_LIMIT`.
+
 List of language codes: https://0.0.0.0:5000/languages
 
 ### Auto Detect Language
@@ -170,7 +182,8 @@ If the backend becomes unreachable during operation:
   --retry-attempts 5 \
   --retry-delay 1000 \
   --model-recheck-interval 30 \
-  --char-limit 5000
+  --char-limit 5000 \
+  --batch-limit 50
 ```
 
 All CLI options can also be configured via environment variables (with CLI arguments taking precedence over environment variables):
@@ -187,6 +200,7 @@ All CLI options can also be configured via environment variables (with CLI argum
 | `--retry-delay` | `LTE_RETRY_DELAY` | Base delay in ms for exponential backoff | `1000` |
 | `--model-recheck-interval` | `LTE_MODEL_RECHECK_INTERVAL` | Seconds between periodic model availability rechecks (0 to disable) | `30` |
 | `--char-limit` | `LTE_CHAR_LIMIT` | Maximum character limit for translation requests | `5000` |
+| `--batch-limit` | `LTE_BATCH_LIMIT` | Maximum number of strings accepted in JSON `q` arrays | `50` |
 
 ### Environment Variables Example
 

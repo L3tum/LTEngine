@@ -96,35 +96,42 @@ impl OpenAiProvider {
             }
 
             match request.send().await {
-                Ok(response) => {
-                    match response.error_for_status() {
-                        Ok(response) => {
-                            let body: CompletionResponse = response.json().await
-                                .with_context(|| "Failed to parse backend response as JSON")?;
+                Ok(response) => match response.error_for_status() {
+                    Ok(response) => {
+                        let body: CompletionResponse = response
+                            .json()
+                            .await
+                            .with_context(|| "Failed to parse backend response as JSON")?;
 
-                            return body.choices
-                                .first()
-                                .and_then(|c| c.message.content.clone())
-                                .ok_or_else(|| anyhow::anyhow!("Empty response from backend"));
-                        }
-                        Err(e) => {
-                            if let Some(status) = e.status() {
-                                let detail = e.to_string();
-                                return Err(BackendError::Http { status_code: status.as_u16(), detail }.into());
-                            }
-                            return Err(e.into());
-                        }
+                        return body
+                            .choices
+                            .first()
+                            .and_then(|c| c.message.content.clone())
+                            .ok_or_else(|| anyhow::anyhow!("Empty response from backend"));
                     }
-                }
+                    Err(e) => {
+                        if let Some(status) = e.status() {
+                            let detail = e.to_string();
+                            return Err(BackendError::Http {
+                                status_code: status.as_u16(),
+                                detail,
+                            }
+                            .into());
+                        }
+                        return Err(e.into());
+                    }
+                },
                 Err(e) => {
                     let is_retryable = e.is_timeout() || e.is_connect();
 
                     if is_retryable && attempt < max_attempts {
                         let delay = Duration::from_millis(
-                            config.base_delay_ms * 2u64.pow(attempt as u32 - 1)
+                            config.base_delay_ms * 2u64.pow(attempt as u32 - 1),
                         );
-                        eprintln!("Translation request failed (attempt {}), retrying in {:?}: {}",
-                                 attempt, delay, e);
+                        eprintln!(
+                            "Translation request failed (attempt {}), retrying in {:?}: {}",
+                            attempt, delay, e
+                        );
                         sleep(delay).await;
                         continue;
                     }
@@ -152,7 +159,10 @@ impl OpenAiProvider {
             }
             Err(_) => {}
         }
-        Err(anyhow::anyhow!("Backend at {} is not reachable", self.base_url))
+        Err(anyhow::anyhow!(
+            "Backend at {} is not reachable",
+            self.base_url
+        ))
     }
 
     /// Check if the backend is reachable and the model is available.
@@ -207,22 +217,30 @@ impl OpenAiProvider {
             if resp.status().is_success() {
                 // Rate-limit this warning: only log once per 10 seconds
                 static_last_model_enum_warning_check(&format!("{}:{}", self.base_url, self.model));
-                eprintln!("Warning: backend at {} is reachable but model enumeration failed, assuming model '{}' is available",
-                          self.base_url, self.model);
+                eprintln!(
+                    "Warning: backend at {} is reachable but model enumeration failed, assuming model '{}' is available",
+                    self.base_url, self.model
+                );
                 return Ok(Vec::new()); // backend reachable but we couldn't enumerate models
             }
         }
 
-        Err(anyhow::anyhow!("Backend at {} is not reachable", self.base_url))
+        Err(anyhow::anyhow!(
+            "Backend at {} is not reachable",
+            self.base_url
+        ))
     }
 }
 
 /// Helper to rate-limit the model enumeration warning.
 /// Logs at most once every 10 seconds per backend URL.
-static LAST_MODEL_ENUM_WARN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
+static LAST_MODEL_ENUM_WARN: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+> = std::sync::OnceLock::new();
 
 fn static_last_model_enum_warning_check(key: &str) {
-    let map = LAST_MODEL_ENUM_WARN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let map = LAST_MODEL_ENUM_WARN
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     let now = std::time::Instant::now();
     let mut map = map.lock().unwrap();
     if let Some(&last) = map.get(key) {
