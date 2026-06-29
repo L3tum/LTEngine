@@ -5,10 +5,8 @@ members = [
 ]
 
 [workspace.dependencies]
-thiserror = "1"
 tracing = "0.1"
 tracing-core = "0.1"
-encoding_rs = "0.8.35"
 
 [workspace.lints.rust]
 missing_docs = { level = "warn" }
