@@ -2,15 +2,33 @@
 
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use super::{BackendError, TranslateProvider};
+
+/// Flexible backend timing data (e.g., from llama.cpp).
+/// Captures arbitrary timing keys like prompt_n, predicted_ms, etc.
+#[derive(Deserialize, Debug, Serialize, Default)]
+pub struct BackendTimings {
+    #[serde(flatten)]
+    additional: HashMap<String, serde_json::Value>,
+}
+
+/// Combined translation result with optional backend timing information.
+#[derive(Debug)]
+pub struct TranslationResult {
+    pub text: String,
+    pub backend_timings: Option<BackendTimings>,
+}
 
 /// Response structure for OpenAI-compatible chat completions API.
 #[derive(Deserialize, Debug)]
 struct CompletionResponse {
     choices: Vec<Choice>,
+    #[serde(default, rename = "timings")]
+    timing: Option<BackendTimings>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -56,8 +74,12 @@ impl OpenAiProvider {
     }
 
     /// Send a single translation request to the backend. No retry — retry is handled by ProviderManager.
-    /// Returns the translated text or a `BackendError` (retryable or not).
-    pub async fn translate_with_config(&self, system: &str, user: &str) -> Result<String> {
+    /// Returns the translated text with optional backend timing information, or a `BackendError` (retryable or not).
+    pub async fn translate_with_config(
+        &self,
+        system: &str,
+        user: &str,
+    ) -> Result<TranslationResult> {
         let url = format!("{}/v1/chat/completions", self.base_url);
 
         let mut request = self.client.post(&url).json(&serde_json::json!({
@@ -80,10 +102,15 @@ impl OpenAiProvider {
                         .await
                         .with_context(|| "Failed to parse backend response as JSON")?;
 
-                    body.choices
+                    let text = body
+                        .choices
                         .first()
                         .and_then(|c| c.message.content.clone())
-                        .ok_or_else(|| anyhow::anyhow!("Empty response from backend"))
+                        .ok_or_else(|| anyhow::anyhow!("Empty response from backend"))?;
+                    Ok(TranslationResult {
+                        text,
+                        backend_timings: body.timing,
+                    })
                 }
                 Err(e) => {
                     if let Some(status) = e.status() {
@@ -210,7 +237,7 @@ impl TranslateProvider for OpenAiProvider {
         self.ping_backend().await
     }
 
-    async fn translate(&self, system: &str, user: &str) -> Result<String> {
+    async fn translate(&self, system: &str, user: &str) -> Result<TranslationResult> {
         self.translate_with_config(system, user).await
     }
 }

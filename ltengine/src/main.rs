@@ -7,6 +7,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Instant;
 
 mod backend;
 mod banner;
@@ -21,7 +22,7 @@ mod static_handler;
 #[cfg(test)]
 mod tests;
 
-use backend::{BackendError, ProviderConfig, ProviderManager};
+use backend::{BackendError, BackendTimings, ProviderConfig, ProviderManager};
 use banner::print_banner;
 use detection::create_detector;
 use error_response::ErrorResponse;
@@ -154,6 +155,7 @@ struct TranslateRequest {
     api_key: Option<String>,
     alternatives: Option<u32>,
     enable_cleanup_reporting: Option<bool>,
+    enable_performance_reporting: Option<bool>,
 }
 
 #[derive(MultipartForm)]
@@ -165,6 +167,7 @@ struct MPTranslateRequest {
     api_key: Option<MPText<String>>,
     alternatives: Option<MPText<u32>>,
     enable_cleanup_reporting: Option<MPText<String>>,
+    enable_performance_reporting: Option<MPText<String>>,
 }
 
 /// Helper function to convert a string to bool.
@@ -184,6 +187,9 @@ impl MPTranslateRequest {
             alternatives: self.alternatives.map(|v| v.into_inner()),
             enable_cleanup_reporting: self
                 .enable_cleanup_reporting
+                .map(|v| str_to_bool(&v.into_inner())),
+            enable_performance_reporting: self
+                .enable_performance_reporting
                 .map(|v| str_to_bool(&v.into_inner())),
         }
     }
@@ -432,17 +438,18 @@ async fn translate_one_with_cleanup(
     prompt_builder: &PromptBuilder,
     provider_manager: &ProviderManager,
     disable_cleanup: bool,
-) -> Result<(String, usize, usize), ErrorResponse> {
+) -> Result<(String, usize, usize, Option<BackendTimings>), ErrorResponse> {
     // If source equals target, return the original text without translating.
     // This is a performance optimization but may be semantically unexpected.
-    let translated_text = if source == target {
-        q.clone()
+    let (translated_text, backend_timings) = if source == target {
+        (q.clone(), None)
     } else {
         let prompt = prompt_builder.build(q);
-        provider_manager
+        let result = provider_manager
             .translate(&prompt.system, &prompt.user)
             .await
-            .map_err(map_translation_error)?
+            .map_err(map_translation_error)?;
+        (result.text, result.backend_timings)
     };
 
     // Apply cleanup unless disabled via CLI/env
@@ -459,7 +466,12 @@ async fn translate_one_with_cleanup(
         (result.cleaned, result.removed, result.replaced)
     };
 
-    Ok((improve_formatting(q, &translated_text), removed, replaced))
+    Ok((
+        improve_formatting(q, &translated_text),
+        removed,
+        replaced,
+        backend_timings,
+    ))
 }
 
 #[get("/health")]
@@ -530,18 +542,25 @@ async fn translate(
     let mut total_cleanup_removed = 0usize;
     let mut total_cleanup_replaced = 0usize;
 
+    let mut detect_per_text_ms: Vec<u64> = Vec::with_capacity(q.as_slice().len());
+    let mut translate_per_text_ms: Vec<u64> = Vec::with_capacity(q.as_slice().len());
+    let mut backend_timings: Vec<Option<BackendTimings>> = Vec::with_capacity(q.as_slice().len());
+
     if source == "auto" {
         // Use LLM-based detection if enabled, otherwise fall back to whatlang.
         // We detect language first, then translate with the detected language.
         let detector = create_detector(&args, &provider_manager);
 
         for text in q.as_slice() {
+            // Detection time is already captured inside detector.detect() and stored in detect_time_ms.
             let detected = detector.detect(text).await;
+            detect_per_text_ms.push(detected.detect_time_ms);
 
             pb.set_source_language(detected.language.name);
             detected_languages.push(detected.clone());
 
-            let (translated, removed, replaced) = translate_one_with_cleanup(
+            let start = Instant::now();
+            let (translated, removed, replaced, timing) = translate_one_with_cleanup(
                 text,
                 detected.language.internal_code,
                 target,
@@ -550,12 +569,14 @@ async fn translate(
                 args.disable_cleanup,
             )
             .await?;
+            translate_per_text_ms.push(start.elapsed().as_millis() as u64);
+            backend_timings.push(timing);
             translated_texts.push(translated);
             total_cleanup_removed += removed;
             total_cleanup_replaced += replaced;
         }
     } else {
-        // Source is explicitly specified, use whatlang for detection response if requested
+        // Source is explicitly specified, no detection is performed.
         let src_lang = get_language_from_code(source).ok_or_else(|| ErrorResponse {
             error: format!("{} is not supported", source),
             status: 400,
@@ -563,7 +584,8 @@ async fn translate(
         pb.set_source_language(src_lang.name);
 
         for text in q.as_slice() {
-            let (translated, removed, replaced) = translate_one_with_cleanup(
+            let start = Instant::now();
+            let (translated, removed, replaced, timing) = translate_one_with_cleanup(
                 text,
                 source,
                 target,
@@ -572,6 +594,8 @@ async fn translate(
                 args.disable_cleanup,
             )
             .await?;
+            translate_per_text_ms.push(start.elapsed().as_millis() as u64);
+            backend_timings.push(timing);
             translated_texts.push(translated);
             total_cleanup_removed += removed;
             total_cleanup_replaced += replaced;
@@ -610,13 +634,49 @@ async fn translate(
     }
 
     // Add cleanup report if requested
+    let mut reports = serde_json::Map::new();
     if body.enable_cleanup_reporting == Some(true) {
-        response["reports"] = serde_json::json!({
-            "cleanup": {
+        reports.insert(
+            "cleanup".to_string(),
+            serde_json::json!({
                 "removed": total_cleanup_removed,
                 "replaced": total_cleanup_replaced
-            }
-        });
+            }),
+        );
+    }
+
+    // Add performance report if requested
+    if body.enable_performance_reporting == Some(true) {
+        let total_detect_ms: u64 = detect_per_text_ms.iter().sum();
+        let total_translate_ms: u64 = translate_per_text_ms.iter().sum();
+
+        // Serialize backend timings as an array (null for missing timings)
+        let backend_timings_json: Vec<Value> = backend_timings
+            .iter()
+            .map(|t| match t {
+                Some(bt) => serde_json::to_value(bt).unwrap_or(Value::Null),
+                None => Value::Null,
+            })
+            .collect();
+
+        reports.insert(
+            "performance".to_string(),
+            serde_json::json!({
+                "detect": {
+                    "total_ms": total_detect_ms,
+                    "per_text_ms": detect_per_text_ms
+                },
+                "translate": {
+                    "total_ms": total_translate_ms,
+                    "per_text_ms": translate_per_text_ms
+                },
+                "backend_timings": backend_timings_json
+            }),
+        );
+    }
+
+    if !reports.is_empty() {
+        response["reports"] = Value::Object(reports);
     }
 
     Ok(HttpResponse::Ok().json(response))

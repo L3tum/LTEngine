@@ -70,8 +70,8 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
                 .translate(&detect_prompt.system, &detect_prompt.user)
                 .await
             {
-                Ok(response) => {
-                    if let Some((lang, confidence)) = parse_detection_response(&response) {
+                Ok(result) => {
+                    if let Some((lang, confidence)) = parse_detection_response(&result.text) {
                         let correct = lang.internal_code == item.source_language
                             || lang.name == gt_lang
                             || lang.code == item.source_language;
@@ -131,6 +131,7 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
         let translated = provider_manager
             .translate(&translation_prompt.system, &translation_prompt.user)
             .await
+            .map(|result| result.text)
             .unwrap_or_else(|e| format!("[Error: {}]", e));
 
         // Compute sentence-level BLEU with proper tokenization via bleuscore

@@ -121,6 +121,7 @@ pub fn get_language_from_code(code: &str) -> Option<&'static Language> {
 pub struct LangDetect {
     pub language: &'static Language,
     pub confidence: i32,
+    pub detect_time_ms: u64,
 }
 
 pub fn detect_lang(q: &str) -> LangDetect {
@@ -140,15 +141,18 @@ pub fn detect_lang(q: &str) -> LangDetect {
             .map(|l| LangDetect {
                 language: l,
                 confidence: (confidence * 100.0) as i32,
+                detect_time_ms: 0, // will be set by the detector
             })
             .unwrap_or(LangDetect {
                 language: &LANGUAGES[0],
                 confidence: 0,
+                detect_time_ms: 0,
             })
     } else {
         LangDetect {
             language: &LANGUAGES[0],
             confidence: 0,
+            detect_time_ms: 0,
         }
     }
 }

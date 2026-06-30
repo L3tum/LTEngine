@@ -1,6 +1,8 @@
 //! Integration tests with mock translation provider.
 
-use crate::backend::{BackendError, ProviderConfig, ProviderManager, TranslateProvider};
+use crate::backend::{
+    BackendError, ProviderConfig, ProviderManager, TranslateProvider, TranslationResult,
+};
 use crate::prompt::PromptBuilder;
 use crate::{Args, QueryText, TranslateRequest, check_params, detect, translate};
 use actix_web::{App, http::StatusCode, test, web};
@@ -11,8 +13,11 @@ struct MockProvider;
 
 #[async_trait::async_trait]
 impl TranslateProvider for MockProvider {
-    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
-        Ok("TranslatedText".to_string())
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<TranslationResult> {
+        Ok(TranslationResult {
+            text: "TranslatedText".to_string(),
+            backend_timings: None,
+        })
     }
     async fn ping(&self) -> anyhow::Result<()> {
         Ok(())
@@ -36,7 +41,7 @@ impl RetryMockProvider {
 
 #[async_trait::async_trait]
 impl TranslateProvider for RetryMockProvider {
-    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<TranslationResult> {
         let mut count = self.call_count.lock().unwrap();
         let current = *count;
         *count += 1;
@@ -46,7 +51,10 @@ impl TranslateProvider for RetryMockProvider {
             // Simulate a transient retryable error (connection timeout, etc.)
             Err(BackendError::Retryable(format!("Simulated timeout (call {})", current)).into())
         } else {
-            Ok("Finally worked".to_string())
+            Ok(TranslationResult {
+                text: "Finally worked".to_string(),
+                backend_timings: None,
+            })
         }
     }
     async fn ping(&self) -> anyhow::Result<()> {
@@ -61,7 +69,7 @@ async fn test_mock_provider_translate() {
         .translate("You are an expert linguist.", "Hello, world!")
         .await;
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "TranslatedText");
+    assert_eq!(result.unwrap().text, "TranslatedText");
 }
 
 #[tokio::test]
@@ -93,7 +101,7 @@ async fn test_retry_on_transient_failures() {
         .translate("You are an expert linguist.", "Hello, world!")
         .await;
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "Finally worked");
+    assert_eq!(result.unwrap().text, "Finally worked");
     // Should have tried 3 times (2 failures + 1 success)
     assert_eq!(
         *call_count.lock().unwrap(),
@@ -107,7 +115,7 @@ struct PermanentErrorProvider;
 
 #[async_trait::async_trait]
 impl TranslateProvider for PermanentErrorProvider {
-    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<TranslationResult> {
         Err(BackendError::Http(401).into())
     }
     async fn ping(&self) -> anyhow::Result<()> {
@@ -203,6 +211,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         api_key: None,
         alternatives: None,
         enable_cleanup_reporting: None,
+        enable_performance_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -229,6 +238,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         api_key: None,
         alternatives: None,
         enable_cleanup_reporting: None,
+        enable_performance_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -255,6 +265,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         api_key: None,
         alternatives: None,
         enable_cleanup_reporting: None,
+        enable_performance_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -281,6 +292,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         api_key: None,
         alternatives: None,
         enable_cleanup_reporting: None,
+        enable_performance_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -305,6 +317,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         api_key: None,
         alternatives: None,
         enable_cleanup_reporting: None,
+        enable_performance_reporting: None,
     };
     let err = check_params(
         &batch_over_limit,
@@ -429,9 +442,12 @@ struct PollutedProvider;
 
 #[async_trait::async_trait]
 impl TranslateProvider for PollutedProvider {
-    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<TranslationResult> {
         // Returns "Hello\u{200B}wo\u{00AD}rld" (zero-width space + soft hyphen)
-        Ok("Hello\u{200B}wo\u{00AD}rld".to_string())
+        Ok(TranslationResult {
+            text: "Hello\u{200B}wo\u{00AD}rld".to_string(),
+            backend_timings: None,
+        })
     }
     async fn ping(&self) -> anyhow::Result<()> {
         Ok(())

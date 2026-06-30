@@ -26,7 +26,7 @@ enum ModelAvailability {
 }
 
 pub(crate) mod openai;
-pub use openai::OpenAiProvider;
+pub use openai::{BackendTimings, OpenAiProvider, TranslationResult};
 
 /// An error from the backend that may carry an HTTP status code and retryability hint.
 #[derive(Debug)]
@@ -83,8 +83,9 @@ impl Default for ProviderConfig {
 /// A backend that can translate text via system + user prompts.
 #[async_trait::async_trait]
 pub trait TranslateProvider: Send + Sync {
-    /// Translate the given system and user prompts, returning the model's response.
-    async fn translate(&self, system: &str, user: &str) -> Result<String>;
+    /// Translate the given system and user prompts, returning the model's response with
+    /// optional backend timing information.
+    async fn translate(&self, system: &str, user: &str) -> Result<TranslationResult>;
 
     /// Quick connectivity check without consuming a translation.
     /// Returns Ok(()) if the backend is reachable.
@@ -298,7 +299,8 @@ impl ProviderManager {
     ///
     /// If the provider is None, attempts to create it (with its own retry logic), then
     /// translates with retry.
-    pub async fn translate(&self, system: &str, user: &str) -> Result<String> {
+    /// Returns the translated text along with optional backend timing information.
+    pub async fn translate(&self, system: &str, user: &str) -> Result<TranslationResult> {
         // Get or create the provider (with thundering-herd protection)
         let provider = self.get_or_create_provider().await?;
 

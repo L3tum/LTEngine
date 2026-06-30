@@ -4,6 +4,8 @@
 //! or the LLM backend can be used. A factory function creates the appropriate detector
 //! based on the CLI arguments.
 
+use std::time::Instant;
+
 use crate::backend::ProviderManager;
 use crate::languages::{LangDetect, Language};
 use crate::prompt::PromptBuilder;
@@ -86,7 +88,10 @@ pub struct WhatlangDetector;
 #[async_trait::async_trait]
 impl LanguageDetector for WhatlangDetector {
     async fn detect(&self, text: &str) -> LangDetect {
-        crate::languages::detect_lang(text)
+        let start = Instant::now();
+        let mut detection = crate::languages::detect_lang(text);
+        detection.detect_time_ms = start.elapsed().as_millis() as u64;
+        detection
     }
 }
 
@@ -105,25 +110,27 @@ impl LlmDetector {
 #[async_trait::async_trait]
 impl LanguageDetector for LlmDetector {
     async fn detect(&self, text: &str) -> LangDetect {
+        let start = Instant::now();
         let pb = PromptBuilder::new();
         let prompt = pb.build_detect_prompt(text);
 
-        match self
+        let mut detection = match self
             .provider_manager
             .translate(&prompt.system, &prompt.user)
             .await
         {
-            Ok(response) => {
-                if let Some((lang, confidence)) = parse_detection_response(&response) {
+            Ok(result) => {
+                if let Some((lang, confidence)) = parse_detection_response(&result.text) {
                     LangDetect {
                         language: lang,
                         confidence,
+                        detect_time_ms: 0, // placeholder, will be overwritten
                     }
                 } else {
                     // LLM returned text we couldn't match — fallback to whatlang
                     eprintln!(
                         "LLM detection returned unparseable response ('{}'), falling back to whatlang",
-                        response
+                        result.text
                     );
                     crate::languages::detect_lang(text)
                 }
@@ -132,7 +139,9 @@ impl LanguageDetector for LlmDetector {
                 eprintln!("LLM detection failed: {}, falling back to whatlang", e);
                 crate::languages::detect_lang(text)
             }
-        }
+        };
+        detection.detect_time_ms = start.elapsed().as_millis() as u64;
+        detection
     }
 }
 

@@ -250,6 +250,7 @@ document.addEventListener('DOMContentLoaded', function(){
                     //data.append("alternatives", 3);
                     data.append("api_key", self.apiKey);
                     data.append("enable_cleanup_reporting", "true");
+                    data.append("enable_performance_reporting", "true");
 
                     request.open('POST', BaseUrl + '/translate', true);
 
