@@ -84,11 +84,11 @@ pub static LANGUAGES: Lazy<Vec<Language>> = Lazy::new(|| {
         .map(|&(code, alias, name)| {
             let targets: Vec<&str> = LANGS
                 .iter()
-                .filter_map(|&(c, a, _)| Some(if a != "" { a } else { c }))
+                .map(|&(c, a, _)| if !a.is_empty() { a } else { c })
                 .collect();
 
             Language {
-                code: if alias != "" { alias } else { code },
+                code: if !alias.is_empty() { alias } else { code },
                 name,
                 targets: Box::leak(targets.into_boxed_slice()),
                 lang_detect: lang_detect_map.get(name).map(|v| &**v),
@@ -112,9 +112,8 @@ static CODE_TO_INTERNAL_CODE_MAP: Lazy<HashMap<&'static str, &'static str>> = La
         .collect()
 });
 
-pub fn get_language_from_code(code: &String) -> Option<&'static Language> {
-    let code_str = code.as_str();
-    let internal_code = CODE_TO_INTERNAL_CODE_MAP.get(code_str).unwrap_or(&code_str);
+pub fn get_language_from_code(code: &str) -> Option<&'static Language> {
+    let internal_code = CODE_TO_INTERNAL_CODE_MAP.get(code).copied().unwrap_or(code);
     LANGUAGES_MAP.get(internal_code).map(|v| &**v)
 }
 

@@ -197,7 +197,7 @@ async fn parse_payload(
         });
     }
 
-    return Ok(body);
+    Ok(body)
 }
 
 fn check_params(
@@ -273,19 +273,19 @@ fn check_params(
     Ok(true)
 }
 
-fn improve_formatting(q: &String, translation: &String) -> String {
+fn improve_formatting(q: &str, translation: &str) -> String {
     let t = translation.trim().to_string();
 
-    if q.len() == 0 {
+    if q.is_empty() {
         return String::new();
     }
 
-    if t.len() == 0 {
-        return q.clone();
+    if t.is_empty() {
+        return q.to_owned();
     }
 
-    let q_last_char = q.chars().rev().next().unwrap();
-    let translation_last_char = t.chars().rev().next().unwrap();
+    let q_last_char = q.chars().next_back().unwrap();
+    let translation_last_char = t.chars().next_back().unwrap();
     let mut result = t.clone();
 
     const PUNCTUATION_CHARS: [char; 6] = ['!', '?', '.', ',', ';', '。'];

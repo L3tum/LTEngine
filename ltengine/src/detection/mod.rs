@@ -55,12 +55,12 @@ pub fn match_language(response: &str) -> Option<&'static Language> {
 /// Returns (Language, confidence) or None if parsing fails.
 fn parse_detection_response(response: &str) -> Option<(&'static Language, i32)> {
     // Trim and split on whitespace
-    let parts: Vec<&str> = response.trim().split_whitespace().collect();
+    let parts: Vec<&str> = response.split_whitespace().collect();
 
     // Try to find the last element that looks like a confidence score (0-100)
     let (language_str, confidence) = if let Some(last) = parts.last() {
         if let Ok(score) = last.parse::<i32>() {
-            if score >= 0 && score <= 100 {
+            if (0..=100).contains(&score) {
                 // Last part is a number — assume it's confidence
                 let lang_str = parts[..parts.len() - 1].join(" ");
                 (lang_str, score)
