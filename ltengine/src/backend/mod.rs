@@ -32,11 +32,9 @@ pub use openai::OpenAiProvider;
 #[derive(Debug)]
 pub enum BackendError {
     /// Backend returned an HTTP error status (e.g., 401). Not retryable.
-    Http { status_code: u16, detail: String },
+    Http(u16),
     /// Model is not available on the backend (should return 404). Not retryable.
     ModelNotFound(String),
-    /// Other error (parsing, empty response). Not retryable.
-    Other(String),
     /// Network-level or timeout error that can be retried (connection refused, timeout, etc.).
     Retryable(String),
 }
@@ -51,11 +49,8 @@ impl BackendError {
 impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BackendError::Http { status_code, .. } => {
-                write!(f, "Backend HTTP error {}", status_code)
-            }
+            BackendError::Http(status_code) => write!(f, "Backend HTTP error {}", status_code),
             BackendError::ModelNotFound(msg) => write!(f, "{}", msg),
-            BackendError::Other(msg) => write!(f, "{}", msg),
             BackendError::Retryable(msg) => write!(f, "{}", msg),
         }
     }
@@ -434,9 +429,4 @@ impl ProviderManager {
         }
     }
 
-    /// Get the current provider for health checks (cloned for use in async context).
-    pub async fn get_provider(&self) -> Option<Arc<dyn TranslateProvider>> {
-        let provider_guard = self.provider.read().await;
-        provider_guard.clone()
-    }
 }

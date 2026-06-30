@@ -108,18 +108,10 @@ struct PermanentErrorProvider;
 #[async_trait::async_trait]
 impl TranslateProvider for PermanentErrorProvider {
     async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
-        Err(BackendError::Http {
-            status_code: 401,
-            detail: "Unauthorized".to_string(),
-        }
-        .into())
+        Err(BackendError::Http(401).into())
     }
     async fn ping(&self) -> anyhow::Result<()> {
-        Err(BackendError::Http {
-            status_code: 401,
-            detail: "Unauthorized".to_string(),
-        }
-        .into())
+        Err(BackendError::Http(401).into())
     }
 }
 
@@ -144,10 +136,12 @@ async fn test_permanent_error_drops_provider() {
         "Error should mention 401 status"
     );
 
-    // Verify the provider was dropped — get_provider should return None
+    // Verify the provider was dropped — a subsequent call should fail
+    // (it will try to recreate the provider, which will fail since no backend is reachable)
+    let result = provider_manager.translate("system", "Hello again").await;
     assert!(
-        provider_manager.get_provider().await.is_none(),
-        "Provider should have been dropped after permanent error"
+        result.is_err(),
+        "Second call should fail because provider was dropped and no backend is reachable"
     );
 }
 

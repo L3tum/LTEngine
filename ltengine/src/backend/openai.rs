@@ -11,26 +11,16 @@ use super::{BackendError, TranslateProvider};
 #[derive(Deserialize, Debug)]
 struct CompletionResponse {
     choices: Vec<Choice>,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    created: Option<u64>,
-    #[serde(default)]
-    model: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
 struct Choice {
     message: ChatMessage,
-    #[serde(default)]
-    index: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
 struct ChatMessage {
     content: Option<String>,
-    #[serde(default)]
-    role: Option<String>,
 }
 
 /// A provider that sends requests to an OpenAI-compatible chat completions API.
@@ -97,12 +87,7 @@ impl OpenAiProvider {
                 }
                 Err(e) => {
                     if let Some(status) = e.status() {
-                        let detail = e.to_string();
-                        Err(BackendError::Http {
-                            status_code: status.as_u16(),
-                            detail,
-                        }
-                        .into())
+                        Err(BackendError::Http(status.as_u16()).into())
                     } else {
                         Err(e.into())
                     }

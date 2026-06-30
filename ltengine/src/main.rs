@@ -373,10 +373,7 @@ fn map_translation_error(e: anyhow::Error) -> ErrorResponse {
     // Check if the error is a BackendError with an HTTP status code or retryable.
     let (msg, status) = if let Some(backend_err) = e.downcast_ref::<BackendError>() {
         match backend_err {
-            BackendError::Http {
-                status_code,
-                detail: _,
-            } => {
+            BackendError::Http(status_code) => {
                 // Don't leak backend details, use generic message.
                 let http_status = match *status_code {
                     401 => 403, // Forbidden (authentication failed)
@@ -394,10 +391,7 @@ fn map_translation_error(e: anyhow::Error) -> ErrorResponse {
                 // The next request will trigger a new creation attempt.
                 ("Backend temporarily unavailable".to_string(), 503)
             }
-            BackendError::Other(_) => {
-                // Other backend errors (parsing, empty response) — 500.
-                ("Backend error".to_string(), 500)
-            }
+            // No Other variant — generic handling below covers remaining cases.
         }
     } else {
         // Generic error (e.g., creation failed after max retries) — 503.
