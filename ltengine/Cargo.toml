@@ -18,6 +18,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 async-trait = "0.1"
 tokio = { version = "1", features = ["time", "signal", "sync", "macros"] }
 subtle = "2.6.1"
+bleuscore = { version = "0.2.0", optional = true }
+
+[features]
+default = ["benchmark"]
+benchmark = ["dep:bleuscore"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

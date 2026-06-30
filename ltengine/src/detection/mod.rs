@@ -53,7 +53,7 @@ pub fn match_language(response: &str) -> Option<&'static Language> {
 /// Expected format: "<language> <score>" where score is 0-100.
 /// If the format doesn't match, tries to extract language and confidence separately.
 /// Returns (Language, confidence) or None if parsing fails.
-fn parse_detection_response(response: &str) -> Option<(&'static Language, i32)> {
+pub(crate) fn parse_detection_response(response: &str) -> Option<(&'static Language, i32)> {
     // Trim and split on whitespace
     let parts: Vec<&str> = response.split_whitespace().collect();
 

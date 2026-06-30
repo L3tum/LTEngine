@@ -1,0 +1,140 @@
+[
+  {
+    "source": "Hello, world!",
+    "source_language": "en",
+    "target_language": "es",
+    "reference": "¡Hola, mundo!"
+  },
+  {
+    "source": "Good morning, how are you?",
+    "source_language": "en",
+    "target_language": "fr",
+    "reference": "Bonjour, comment allez-vous ?"
+  },
+  {
+    "source": "The quick brown fox jumps over the lazy dog.",
+    "source_language": "en",
+    "target_language": "de",
+    "reference": "Der schnelle braune Fuchs springt über den faulen Hund."
+  },
+  {
+    "source": "Knowledge is power.",
+    "source_language": "en",
+    "target_language": "da",
+    "reference": "Viden er magt."
+  },
+  {
+    "source": "Je suis étourdi.",
+    "source_language": "fr",
+    "target_language": "en",
+    "reference": "I am dazed."
+  },
+  {
+    "source": "L'avenir appartient à ceux qui croient à la beauté de leurs rêves.",
+    "source_language": "fr",
+    "target_language": "es",
+    "reference": "El futuro pertenece a aquellos que creen en la belleza de sus sueños."
+  },
+  {
+    "source": "Wie geht es Ihnen?",
+    "source_language": "de",
+    "target_language": "en",
+    "reference": "How are you?"
+  },
+  {
+    "source": "Die Welt ist ein Buch, und wer nicht reist, liest nur eine Seite.",
+    "source_language": "de",
+    "target_language": "fr",
+    "reference": "Le monde est un livre, et celui qui ne voyage pas n'en lit qu'une page."
+  },
+  {
+    "source": "El tiempo es oro.",
+    "source_language": "es",
+    "target_language": "en",
+    "reference": "Time is gold."
+  },
+  {
+    "source": "Hasta la vista, baby.",
+    "source_language": "es",
+    "target_language": "en",
+    "reference": "See you later, baby."
+  },
+  {
+    "source": "Det er aldrig for sent at begynde forfra.",
+    "source_language": "da",
+    "target_language": "en",
+    "reference": "It's never too late to start over."
+  },
+  {
+    "source": "Kærlighed er en drøm, der aldrig falmer.",
+    "source_language": "da",
+    "target_language": "es",
+    "reference": "El amor es un sueño que nunca se desvanece."
+  },
+  {
+    "source": "こんにちは、世界！",
+    "source_language": "ja",
+    "target_language": "en",
+    "reference": "Hello, world!"
+  },
+  {
+    "source": "猫は幸せそうな顔をしている。",
+    "source_language": "ja",
+    "target_language": "en",
+    "reference": "The cat has a happy face."
+  },
+  {
+    "source": "人生は旅だ。",
+    "source_language": "ja",
+    "target_language": "fr",
+    "reference": "La vie est un voyage."
+  },
+  {
+    "source": "你好，世界！",
+    "source_language": "zh",
+    "target_language": "en",
+    "reference": "Hello, world!"
+  },
+  {
+    "source": "生活就像一盒巧克力。",
+    "source_language": "zh",
+    "target_language": "en",
+    "reference": "Life is like a box of chocolates."
+  },
+  {
+    "source": "時間就是金钱。",
+    "source_language": "zh",
+    "target_language": "es",
+    "reference": "El tiempo es dinero."
+  },
+  {
+    "source": "Привет, мир!",
+    "source_language": "ru",
+    "target_language": "en",
+    "reference": "Hello, world!"
+  },
+  {
+    "source": "Книги — это зеркала: в них видно только лицо человека.",
+    "source_language": "ru",
+    "target_language": "en",
+    "reference": "Books are mirrors: you only see a face."
+  },
+  {
+    "source": "Знание — сила.",
+    "source_language": "ru",
+    "target_language": "de",
+    "reference": "Wissen ist Macht."
+  },
+  {
+    "source": "Tome la decisión de ser feliz.",
+    "source_language": "es",
+    "target_language": "fr",
+    "reference": "Prenez la décision d'être heureux."
+  },
+  {
+    "source": "Le mieux est l'ennemi du bien.",
+    "source_language": "fr",
+    "target_language": "en",
+    "reference": "The best is the enemy of the good."
+  }
+]

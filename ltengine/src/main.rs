@@ -15,6 +15,8 @@ mod detection;
 mod error_response;
 mod languages;
 mod prompt;
+#[cfg(feature = "benchmark")]
+mod benchmark;
 #[cfg(test)]
 mod tests;
 
@@ -81,6 +83,14 @@ struct Args {
     /// Enable language detection via LLM (env var: LTE_LLM_DETECT)
     #[arg(long = "llm-detect", env = "LTE_LLM_DETECT", action)]
     llm_detect: bool,
+
+    /// Run a benchmark against a dataset and exit (env var: LTE_BENCHMARK)
+    #[arg(long, env = "LTE_BENCHMARK", action)]
+    benchmark: bool,
+
+    /// Path to the benchmark dataset JSON file (env var: LTE_DATASET)
+    #[arg(long, env = "LTE_DATASET")]
+    dataset: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -632,6 +642,19 @@ async fn main() -> std::io::Result<()> {
 
     // Initialize the provider with retry (non-blocking if backend isn't ready yet)
     provider_manager.initialize().await;
+
+    // If benchmark mode, run the benchmark and exit
+    if args.benchmark {
+        #[cfg(feature = "benchmark")]
+        {
+            benchmark::run_benchmark(&args, &provider_manager).await;
+        }
+        #[cfg(not(feature = "benchmark"))]
+        {
+            eprintln!("Benchmark feature not enabled. Rebuild with `--features benchmark`.");
+        }
+        return Ok(());
+    }
 
     // Start periodic rechecker if enabled
     if args.model_recheck_interval > 0 {
