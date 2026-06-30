@@ -161,6 +161,7 @@ fn test_args() -> Args {
         llm_detect: false,
         benchmark: false,
         dataset: None,
+        disable_cleanup: false,
     }
 }
 
@@ -201,6 +202,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         format: None,
         api_key: None,
         alternatives: None,
+        enable_cleanup_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -226,6 +228,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         format: None,
         api_key: None,
         alternatives: None,
+        enable_cleanup_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -251,6 +254,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         format: None,
         api_key: None,
         alternatives: None,
+        enable_cleanup_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -276,6 +280,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         format: None,
         api_key: None,
         alternatives: None,
+        enable_cleanup_reporting: None,
     };
     assert_eq!(
         check_params(
@@ -299,6 +304,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         format: None,
         api_key: None,
         alternatives: None,
+        enable_cleanup_reporting: None,
     };
     let err = check_params(
         &batch_over_limit,
@@ -416,4 +422,89 @@ async fn test_detect_accepts_batch_q() {
     assert_eq!(body[1]["language"], "fr");
     assert!(body[0]["confidence"].is_number());
     assert!(body[1]["confidence"].is_number());
+}
+
+/// A mock provider that returns text with invisible Unicode characters (zero-width space + soft hyphen).
+struct PollutedProvider;
+
+#[async_trait::async_trait]
+impl TranslateProvider for PollutedProvider {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
+        // Returns "Hello\u{200B}wo\u{00AD}rld" (zero-width space + soft hyphen)
+        Ok("Hello\u{200B}wo\u{00AD}rld".to_string())
+    }
+    async fn ping(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Test that enable_cleanup_reporting=true includes cleanup stats in the response.
+/// Also verifies that the cleanup itself ran correctly (removed 1 char, replaced 1).
+#[actix_web::test]
+async fn test_cleanup_reporting_enabled_shows_stats() {
+    let args = Arc::new(test_args());
+    let provider_manager = Arc::new(ProviderManager::from_provider(
+        Arc::new(PollutedProvider),
+        ProviderConfig::default(),
+    ));
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(args))
+            .app_data(web::Data::new(provider_manager))
+            .service(translate),
+    )
+    .await;
+
+    let req = test::TestRequest::post()
+        .uri("/translate")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(r#"{"q":"Hello world","source":"en","target":"es","enable_cleanup_reporting":true}"#)
+        .to_request();
+    let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+
+    // Cleanup removes the zero-width space and replaces the soft hyphen
+    // Original: "Hello" + ZWSP + "wo" + soft-hyphen + "rld" -> "Hellowo-rld"
+    assert_eq!(resp["translatedText"], "Hellowo-rld");
+    assert!(resp["reports"].is_object());
+    assert_eq!(resp["reports"]["cleanup"]["removed"], 1);
+    assert_eq!(resp["reports"]["cleanup"]["replaced"], 1);
+}
+
+/// Test that enable_cleanup_reporting=false or omitting it results in no reports key.
+#[actix_web::test]
+async fn test_cleanup_reporting_disabled_no_reports() {
+    let args = Arc::new(test_args());
+    let provider_manager = Arc::new(ProviderManager::from_provider(
+        Arc::new(PollutedProvider),
+        ProviderConfig::default(),
+    ));
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(args))
+            .app_data(web::Data::new(provider_manager))
+            .service(translate),
+    )
+    .await;
+
+    // With explicit false
+    let req_false = test::TestRequest::post()
+        .uri("/translate")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(r#"{"q":"Hello world","source":"en","target":"es","enable_cleanup_reporting":false}"#)
+        .to_request();
+    let resp_false: serde_json::Value = test::call_and_read_body_json(&app, req_false).await;
+    assert_eq!(resp_false["translatedText"], "Hellowo-rld"); // cleanup still runs, just no stats
+    assert!(resp_false.get("reports").is_none());
+
+    // Without the field at all
+    let req_omitted = test::TestRequest::post()
+        .uri("/translate")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(r#"{"q":"Hello world","source":"en","target":"es"}"#)
+        .to_request();
+    let resp_omitted: serde_json::Value = test::call_and_read_body_json(&app, req_omitted).await;
+    assert_eq!(resp_omitted["translatedText"], "Hellowo-rld");
+    assert!(resp_omitted.get("reports").is_none());
 }

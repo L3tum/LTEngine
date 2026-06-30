@@ -249,6 +249,7 @@ document.addEventListener('DOMContentLoaded', function(){
                     data.append("format", self.isHtml ? "html" : "text");
                     //data.append("alternatives", 3);
                     data.append("api_key", self.apiKey);
+                    data.append("enable_cleanup_reporting", "true");
 
                     request.open('POST', BaseUrl + '/translate', true);
 

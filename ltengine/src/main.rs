@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 mod backend;
 mod banner;
+mod cleanup;
 mod detection;
 mod error_response;
 mod languages;
@@ -91,6 +92,10 @@ struct Args {
     /// Path to the benchmark dataset JSON file (env var: LTE_DATASET)
     #[arg(long, env = "LTE_DATASET")]
     dataset: Option<String>,
+
+    /// Disable Unicode cleanup of LLM output (cleanup is ON by default; use --disable-cleanup to turn it off) (env var: LTE_DISABLE_CLEANUP)
+    #[arg(long, env = "LTE_DISABLE_CLEANUP", action)]
+    disable_cleanup: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -150,6 +155,7 @@ struct TranslateRequest {
     format: Option<String>,
     api_key: Option<String>,
     alternatives: Option<u32>,
+    enable_cleanup_reporting: Option<bool>,
 }
 
 #[derive(MultipartForm)]
@@ -160,7 +166,18 @@ struct MPTranslateRequest {
     format: Option<MPText<String>>,
     api_key: Option<MPText<String>>,
     alternatives: Option<MPText<u32>>,
+    enable_cleanup_reporting: Option<MPText<String>>,
 }
+
+/// Helper function to convert a string to bool.
+/// Returns `true` for "true", "yes", "1" (case-insensitive), `false` for anything else.
+fn str_to_bool(s: &str) -> bool {
+    match s.trim().to_lowercase().as_str() {
+        "true" | "yes" | "1" => true,
+        _ => false,
+    }
+}
+
 impl MPTranslateRequest {
     fn into_translate_request(self) -> TranslateRequest {
         TranslateRequest {
@@ -170,6 +187,9 @@ impl MPTranslateRequest {
             format: self.format.map(|v| v.into_inner()),
             api_key: self.api_key.map(|v| v.into_inner()),
             alternatives: self.alternatives.map(|v| v.into_inner()),
+            enable_cleanup_reporting: self
+                .enable_cleanup_reporting
+                .map(|v| str_to_bool(&v.into_inner())),
         }
     }
 }
@@ -411,13 +431,14 @@ fn map_translation_error(e: anyhow::Error) -> ErrorResponse {
     ErrorResponse { error: msg, status }
 }
 
-async fn translate_one(
+async fn translate_one_with_cleanup(
     q: &String,
     source: &str,
     target: &str,
     prompt_builder: &PromptBuilder,
     provider_manager: &ProviderManager,
-) -> Result<String, ErrorResponse> {
+    disable_cleanup: bool,
+) -> Result<(String, usize, usize), ErrorResponse> {
     // If source equals target, return the original text without translating.
     // This is a performance optimization but may be semantically unexpected.
     let translated_text = if source == target {
@@ -430,7 +451,21 @@ async fn translate_one(
             .map_err(map_translation_error)?
     };
 
-    Ok(improve_formatting(q, &translated_text))
+    // Apply cleanup unless disabled via CLI/env
+    let (translated_text, removed, replaced) = if disable_cleanup {
+        (translated_text, 0, 0)
+    } else {
+        let result = cleanup::cleanup_output(&translated_text);
+        if result.removed > 0 || result.replaced > 0 {
+            eprintln!(
+                "cleanup: {} characters removed, {} characters replaced from LLM output",
+                result.removed, result.replaced
+            );
+        }
+        (result.cleaned, result.removed, result.replaced)
+    };
+
+    Ok((improve_formatting(q, &translated_text), removed, replaced))
 }
 
 #[get("/health")]
@@ -498,6 +533,8 @@ async fn translate(
 
     let mut translated_texts = Vec::with_capacity(q.as_slice().len());
     let mut detected_languages = Vec::with_capacity(q.as_slice().len());
+    let mut total_cleanup_removed = 0usize;
+    let mut total_cleanup_replaced = 0usize;
 
     if source == "auto" {
         // Use LLM-based detection if enabled, otherwise fall back to whatlang.
@@ -510,16 +547,18 @@ async fn translate(
             pb.set_source_language(detected.language.name);
             detected_languages.push(detected.clone());
 
-            translated_texts.push(
-                translate_one(
-                    text,
-                    detected.language.internal_code,
-                    target,
-                    &pb,
-                    &provider_manager,
-                )
-                .await?,
-            );
+            let (translated, removed, replaced) = translate_one_with_cleanup(
+                text,
+                detected.language.internal_code,
+                target,
+                &pb,
+                &provider_manager,
+                args.disable_cleanup,
+            )
+            .await?;
+            translated_texts.push(translated);
+            total_cleanup_removed += removed;
+            total_cleanup_replaced += replaced;
         }
     } else {
         // Source is explicitly specified, use whatlang for detection response if requested
@@ -530,8 +569,18 @@ async fn translate(
         pb.set_source_language(src_lang.name);
 
         for text in q.as_slice() {
-            translated_texts
-                .push(translate_one(text, source, target, &pb, &provider_manager).await?);
+            let (translated, removed, replaced) = translate_one_with_cleanup(
+                text,
+                source,
+                target,
+                &pb,
+                &provider_manager,
+                args.disable_cleanup,
+            )
+            .await?;
+            translated_texts.push(translated);
+            total_cleanup_removed += removed;
+            total_cleanup_replaced += replaced;
         }
     }
 
@@ -564,6 +613,16 @@ async fn translate(
             })
         };
         response["detectedLanguage"] = detected_lang_array;
+    }
+
+    // Add cleanup report if requested
+    if body.enable_cleanup_reporting == Some(true) {
+        response["reports"] = serde_json::json!({
+            "cleanup": {
+                "removed": total_cleanup_removed,
+                "replaced": total_cleanup_replaced
+            }
+        });
     }
 
     Ok(HttpResponse::Ok().json(response))
