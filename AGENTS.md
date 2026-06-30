@@ -7,6 +7,8 @@
 
 ## Build / Run
 
+**Important:** After making any code changes, run `make all` (or `make check && make fmt && make test && make clippy`) to ensure the full suite passes before committing. This includes compilation, formatting, tests, and clippy lint checks. CI will also run MIRI (`make miri`) and cargo-deny (`make deny`) which require the nightly toolchain — ensure those pass as well before merging.
+
 ```bash
 git clone <repo> && cd LTEngine
 cargo build --release   # static musl binary, no GPU features needed

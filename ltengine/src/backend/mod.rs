@@ -428,5 +428,4 @@ impl ProviderManager {
             Err(anyhow!("No provider available"))
         }
     }
-
 }

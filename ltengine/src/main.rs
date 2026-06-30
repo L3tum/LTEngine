@@ -11,13 +11,13 @@ use std::sync::Arc;
 
 mod backend;
 mod banner;
+#[cfg(feature = "benchmark")]
+mod benchmark;
 mod cleanup;
 mod detection;
 mod error_response;
 mod languages;
 mod prompt;
-#[cfg(feature = "benchmark")]
-mod benchmark;
 #[cfg(test)]
 mod tests;
 
@@ -172,10 +172,7 @@ struct MPTranslateRequest {
 /// Helper function to convert a string to bool.
 /// Returns `true` for "true", "yes", "1" (case-insensitive), `false` for anything else.
 fn str_to_bool(s: &str) -> bool {
-    match s.trim().to_lowercase().as_str() {
-        "true" | "yes" | "1" => true,
-        _ => false,
-    }
+    matches!(s.trim().to_lowercase().as_str(), "true" | "yes" | "1")
 }
 
 impl MPTranslateRequest {
@@ -420,8 +417,7 @@ fn map_translation_error(e: anyhow::Error) -> ErrorResponse {
                 // ProviderManager dropped the provider after max retries.
                 // The next request will trigger a new creation attempt.
                 ("Backend temporarily unavailable".to_string(), 503)
-            }
-            // No Other variant — generic handling below covers remaining cases.
+            } // No Other variant — generic handling below covers remaining cases.
         }
     } else {
         // Generic error (e.g., creation failed after max retries) — 503.

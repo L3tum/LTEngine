@@ -83,7 +83,11 @@ pub fn cleanup_output(input: &str) -> CleanupResult {
         }
     }
 
-    CleanupResult { cleaned: output, removed: removed_count, replaced: replaced_count }
+    CleanupResult {
+        cleaned: output,
+        removed: removed_count,
+        replaced: replaced_count,
+    }
 }
 
 #[cfg(test)]

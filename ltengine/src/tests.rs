@@ -459,7 +459,9 @@ async fn test_cleanup_reporting_enabled_shows_stats() {
     let req = test::TestRequest::post()
         .uri("/translate")
         .insert_header(("Content-Type", "application/json"))
-        .set_payload(r#"{"q":"Hello world","source":"en","target":"es","enable_cleanup_reporting":true}"#)
+        .set_payload(
+            r#"{"q":"Hello world","source":"en","target":"es","enable_cleanup_reporting":true}"#,
+        )
         .to_request();
     let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
 
@@ -492,7 +494,9 @@ async fn test_cleanup_reporting_disabled_no_reports() {
     let req_false = test::TestRequest::post()
         .uri("/translate")
         .insert_header(("Content-Type", "application/json"))
-        .set_payload(r#"{"q":"Hello world","source":"en","target":"es","enable_cleanup_reporting":false}"#)
+        .set_payload(
+            r#"{"q":"Hello world","source":"en","target":"es","enable_cleanup_reporting":false}"#,
+        )
         .to_request();
     let resp_false: serde_json::Value = test::call_and_read_body_json(&app, req_false).await;
     assert_eq!(resp_false["translatedText"], "Hellowo-rld"); // cleanup still runs, just no stats
