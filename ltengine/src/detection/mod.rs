@@ -30,7 +30,6 @@ pub fn match_language(response: &str) -> Option<&'static Language> {
     let cleaned = response
         .trim()
         .trim_matches(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '(' || c == ')')
-        .trim()
         .to_lowercase();
 
     // Try matching by name first (case-insensitive, full name including parentheticals)

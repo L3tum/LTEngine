@@ -73,64 +73,6 @@ impl OpenAiProvider {
         }
     }
 
-    /// Send a single translation request to the backend. No retry — retry is handled by ProviderManager.
-    /// Returns the translated text with optional backend timing information, or a `BackendError` (retryable or not).
-    pub async fn translate_with_config(
-        &self,
-        system: &str,
-        user: &str,
-    ) -> Result<TranslationResult> {
-        let url = format!("{}/v1/chat/completions", self.base_url);
-
-        let mut request = self.client.post(&url).json(&serde_json::json!({
-            "model": &self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ]
-        }));
-
-        if let Some(key) = &self.api_key {
-            request = request.header("Authorization", format!("Bearer {}", key));
-        }
-
-        match request.send().await {
-            Ok(response) => match response.error_for_status() {
-                Ok(response) => {
-                    let body: CompletionResponse = response
-                        .json()
-                        .await
-                        .with_context(|| "Failed to parse backend response as JSON")?;
-
-                    let text = body
-                        .choices
-                        .first()
-                        .and_then(|c| c.message.content.clone())
-                        .ok_or_else(|| anyhow::anyhow!("Empty response from backend"))?;
-                    Ok(TranslationResult {
-                        text,
-                        backend_timings: body.timing,
-                    })
-                }
-                Err(e) => {
-                    if let Some(status) = e.status() {
-                        Err(BackendError::Http(status.as_u16()).into())
-                    } else {
-                        Err(e.into())
-                    }
-                }
-            },
-            Err(e) => {
-                // Connection or timeout errors are retryable
-                if e.is_timeout() || e.is_connect() {
-                    Err(BackendError::Retryable(e.to_string()).into())
-                } else {
-                    Err(e.into())
-                }
-            }
-        }
-    }
-
     /// Quick connectivity check: hit the /health endpoint.
     /// All supported inference engines (Ollama, vLLM, llama.cpp server) expose this.
     pub async fn ping_backend(&self) -> Result<()> {
@@ -237,7 +179,57 @@ impl TranslateProvider for OpenAiProvider {
         self.ping_backend().await
     }
 
+    /// Send a single translation request to the backend. No retry — retry is handled by ProviderManager.
+    /// Returns the translated text with optional backend timing information, or a `BackendError` (retryable or not).
     async fn translate(&self, system: &str, user: &str) -> Result<TranslationResult> {
-        self.translate_with_config(system, user).await
+        let url = format!("{}/v1/chat/completions", self.base_url);
+
+        let mut request = self.client.post(&url).json(&serde_json::json!({
+            "model": &self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+        }));
+
+        if let Some(key) = &self.api_key {
+            request = request.header("Authorization", format!("Bearer {}", key));
+        }
+
+        match request.send().await {
+            Ok(response) => match response.error_for_status() {
+                Ok(response) => {
+                    let body: CompletionResponse = response
+                        .json()
+                        .await
+                        .with_context(|| "Failed to parse backend response as JSON")?;
+
+                    let text = body
+                        .choices
+                        .first()
+                        .and_then(|c| c.message.content.clone())
+                        .ok_or_else(|| anyhow::anyhow!("Empty response from backend"))?;
+                    Ok(TranslationResult {
+                        text,
+                        backend_timings: body.timing,
+                    })
+                }
+                Err(e) => {
+                    if let Some(status) = e.status() {
+                        Err(BackendError::Http(status.as_u16()).into())
+                    } else {
+                        Err(e.into())
+                    }
+                }
+            },
+            Err(e) => {
+                // Connection or timeout errors are retryable
+                if e.is_timeout() || e.is_connect() {
+                    Err(BackendError::Retryable(e.to_string()).into())
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 }

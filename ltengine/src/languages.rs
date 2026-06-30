@@ -69,7 +69,10 @@ pub struct Language {
 }
 
 pub static LANGUAGES: Lazy<Vec<Language>> = Lazy::new(|| {
-    // From whatlang names to our names
+    // ponytail: targets are static for process lifetime; Box::leak is a conscious trade-off
+    // to avoid adding dynamic allocation per language lookup at runtime.
+    // This leaks ~50 small Vec<&str> allocations permanently, acceptable for a single-shot daemon.
+    // To fix: use a separate Lazy<Vec<Language>> with dynamic targets, but adds indirection.
     let eng_name_map: HashMap<&'static str, &'static str> =
         [("Mandarin", "Chinese")].iter().cloned().collect();
 
@@ -143,10 +146,18 @@ pub fn detect_lang(q: &str) -> LangDetect {
                 confidence: (confidence * 100.0) as i32,
                 detect_time_ms: 0, // will be set by the detector
             })
-            .unwrap_or(LangDetect {
-                language: &LANGUAGES[0],
-                confidence: 0,
-                detect_time_ms: 0,
+            .unwrap_or_else(|| {
+                // ponytail: silently falling back to English could mask bugs; add a warning
+                eprintln!(
+                    "warning: whatlang detected '{}' ({:?}) not in our language allowlist, falling back to English",
+                    lang.eng_name(),
+                    lang,
+                );
+                LangDetect {
+                    language: &LANGUAGES[0],
+                    confidence: 0,
+                    detect_time_ms: 0,
+                }
             })
     } else {
         LangDetect {

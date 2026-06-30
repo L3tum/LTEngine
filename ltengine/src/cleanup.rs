@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn test_soft_hyphen_and_removes() {
+    fn test_soft_hyphen_and_removals() {
         // Input: "hel" + soft-hyphen + "lo" + ZWSP + soft-hyphen + "wor" + ZWNJ + "ld"
         // Output: soft-hyphens replaced with hyphens, ZWSP/ZWNJ removed -> "hel-lo-world"
         let result = cleanup_output("hel\u{00AD}lo\u{200B}\u{00AD}wor\u{200C}ld");

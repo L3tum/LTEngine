@@ -129,7 +129,13 @@ impl QueryText {
         if self.is_batch() {
             serde_json::json!(translated_texts)
         } else {
-            serde_json::json!(translated_texts.into_iter().next().unwrap_or_default())
+            // Defensive: empty input should return null, not an empty string (which could be ambiguous)
+            serde_json::json!(
+                translated_texts
+                    .into_iter()
+                    .next()
+                    .map_or(Value::Null, Value::String)
+            )
         }
     }
 
@@ -388,9 +394,9 @@ async fn detect(
     Ok(HttpResponse::Ok().json(serde_json::Value::Array(results)))
 }
 
-fn check_format(format: &str) -> Result<bool, ErrorResponse> {
+fn check_format(format: &str) -> Result<(), ErrorResponse> {
     match format {
-        "text" | "html" => Ok(true),
+        "text" | "html" => Ok(()),
         _ => Err(ErrorResponse {
             error: "Invalid format. Supported formats: text, html".to_string(),
             status: 400,
@@ -415,7 +421,7 @@ fn map_translation_error(e: anyhow::Error) -> ErrorResponse {
             }
             BackendError::ModelNotFound(msg) => {
                 // Model not available on the backend — return 404.
-                (msg.clone(), 404)
+                (msg.to_string(), 404)
             }
             BackendError::Retryable(_) => {
                 // ProviderManager dropped the provider after max retries.
@@ -484,8 +490,8 @@ async fn health() -> impl Responder {
 }
 
 #[get("/health/backend")]
-async fn backend_health(provider: web::Data<Arc<ProviderManager>>) -> impl Responder {
-    let result = provider.ping().await;
+async fn backend_health(provider_manager: web::Data<Arc<ProviderManager>>) -> impl Responder {
+    let result = provider_manager.ping().await;
 
     match result {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({
