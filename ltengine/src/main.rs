@@ -3,7 +3,6 @@ use actix_web::{
     App, FromRequest, HttpRequest, HttpResponse, HttpServer, Responder, get, http::header, post,
     web,
 };
-use actix_web_static_files::ResourceFiles;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,6 +17,7 @@ mod detection;
 mod error_response;
 mod languages;
 mod prompt;
+mod static_handler;
 #[cfg(test)]
 mod tests;
 
@@ -27,8 +27,6 @@ use detection::create_detector;
 use error_response::ErrorResponse;
 use languages::{LANGUAGES, get_language_from_code};
 use prompt::PromptBuilder;
-
-include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -729,8 +727,6 @@ async fn main() -> std::io::Result<()> {
     let provider_manager_for_shutdown = provider_manager.clone();
 
     let server = HttpServer::new(move || {
-        let generated = generate();
-
         App::new()
             .app_data(web::Data::new(provider_manager.clone()))
             .app_data(web::Data::new(args.clone()))
@@ -742,7 +738,8 @@ async fn main() -> std::io::Result<()> {
             .service(translate_file)
             .service(detect)
             .service(suggest)
-            .service(ResourceFiles::new("/", generated))
+            // Catch-all: any unmatched path goes to the static handler
+            .default_service(web::to(static_handler::serve_static))
     })
     .bind((host.clone(), port))?
     .run();
