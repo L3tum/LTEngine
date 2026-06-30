@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
-use super::{BackendError, ProviderConfig, TranslateProvider};
+use super::{BackendError, TranslateProvider};
 
 /// Response structure for OpenAI-compatible chat completions API.
 #[derive(Deserialize, Debug)]
@@ -65,83 +65,54 @@ impl OpenAiProvider {
         }
     }
 
-    /// Translate with retry and configurable parameters.
-    ///
-    /// Uses exponential backoff on transient errors (5xx, timeouts, connection errors).
-    /// The retry behavior is determined by the provider's parent `ProviderManager` config.
-    pub async fn translate_with_config(
-        &self,
-        system: &str,
-        user: &str,
-        config: &ProviderConfig,
-    ) -> Result<String> {
+    /// Send a single translation request to the backend. No retry — retry is handled by ProviderManager.
+    /// Returns the translated text or a `BackendError` (retryable or not).
+    pub async fn translate_with_config(&self, system: &str, user: &str) -> Result<String> {
         let url = format!("{}/v1/chat/completions", self.base_url);
 
-        let mut attempt = 0;
-        let max_attempts = config.max_attempts;
+        let mut request = self.client.post(&url).json(&serde_json::json!({
+            "model": &self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+        }));
 
-        loop {
-            attempt += 1;
+        if let Some(key) = &self.api_key {
+            request = request.header("Authorization", format!("Bearer {}", key));
+        }
 
-            let mut request = self.client.post(&url).json(&serde_json::json!({
-                "model": &self.model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ]
-            }));
+        match request.send().await {
+            Ok(response) => match response.error_for_status() {
+                Ok(response) => {
+                    let body: CompletionResponse = response
+                        .json()
+                        .await
+                        .with_context(|| "Failed to parse backend response as JSON")?;
 
-            if let Some(key) = &self.api_key {
-                request = request.header("Authorization", format!("Bearer {}", key));
-            }
-
-            match request.send().await {
-                Ok(response) => match response.error_for_status() {
-                    Ok(response) => {
-                        let body: CompletionResponse = response
-                            .json()
-                            .await
-                            .with_context(|| "Failed to parse backend response as JSON")?;
-
-                        return body
-                            .choices
-                            .first()
-                            .and_then(|c| c.message.content.clone())
-                            .ok_or_else(|| anyhow::anyhow!("Empty response from backend"));
-                    }
-                    Err(e) => {
-                        if let Some(status) = e.status() {
-                            let detail = e.to_string();
-                            return Err(BackendError::Http {
-                                status_code: status.as_u16(),
-                                detail,
-                            }
-                            .into());
-                        }
-                        return Err(e.into());
-                    }
-                },
+                    body.choices
+                        .first()
+                        .and_then(|c| c.message.content.clone())
+                        .ok_or_else(|| anyhow::anyhow!("Empty response from backend"))
+                }
                 Err(e) => {
-                    let is_retryable = e.is_timeout() || e.is_connect();
-
-                    if is_retryable && attempt < max_attempts {
-                        let delay = Duration::from_millis(
-                            config.base_delay_ms * 2u64.pow(attempt as u32 - 1),
-                        );
-                        eprintln!(
-                            "Translation request failed (attempt {}), retrying in {:?}: {}",
-                            attempt, delay, e
-                        );
-                        sleep(delay).await;
-                        continue;
+                    if let Some(status) = e.status() {
+                        let detail = e.to_string();
+                        Err(BackendError::Http {
+                            status_code: status.as_u16(),
+                            detail,
+                        }.into())
+                    } else {
+                        Err(e.into())
                     }
-
-                    // After max retries exhausted, return Retryable error so ProviderManager
-                    // will drop the provider on permanent detection, then recreate on next request.
-                    if is_retryable {
-                        return Err(BackendError::Retryable(e.to_string()).into());
-                    }
-                    return Err(e.into());
+                }
+            },
+            Err(e) => {
+                // Connection or timeout errors are retryable
+                if e.is_timeout() || e.is_connect() {
+                    Err(BackendError::Retryable(e.to_string()).into())
+                } else {
+                    Err(e.into())
                 }
             }
         }
@@ -258,9 +229,7 @@ impl TranslateProvider for OpenAiProvider {
         self.ping_backend().await
     }
 
-    async fn translate(&self, system: &str, user: &str, config: &ProviderConfig) -> Result<String> {
-        self.translate_with_config(system, user, config).await
+    async fn translate(&self, system: &str, user: &str) -> Result<String> {
+        self.translate_with_config(system, user).await
     }
 }
-
-use tokio::time::sleep;

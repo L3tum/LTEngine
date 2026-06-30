@@ -171,6 +171,25 @@ Test file at `ltengine/src/tests.rs` includes:
 
 ---
 
+## Pre-Completion Checklist
+
+**Before declaring any task as done, the following must pass:**
+
+1. **`cargo check`** — no compilation errors, no warnings
+2. **`cargo test`** — all unit tests pass
+3. **`cargo fmt -- --check`** — code is formatted consistently (rustfmt default config)
+4. **`cargo clippy --all-targets --all-features -- -D warnings`** — clippy pedantic lints clean (workspace lints apply)
+
+**Additionally, CI runs (see `.github/workflows/build.yml`):**
+- **MIRI** (`make miri`) — detects undefined behavior in safe/unsafe code paths (even without unsafe code, std lib internals can UB). All tests use mocks, so no real network syscalls. Requires the Rust nightly toolchain (`rustup install nightly`).
+- **cargo-deny** (`make deny`) — license compliance, security advisories, banned crate checks (config in `deny.toml`)
+
+A **Makefile** is provided at the root with targets: `check`, `fmt`, `fmt-check`, `clippy`, `test`, `miri`, `deny`, `all` (full suite). Use these for convenience.
+
+All of these are integrated into the GitHub Actions CI pipeline (`build.yml`). If any fail, the task is NOT complete.
+
+---
+
 ## Contributing & Coding Style
 
 - Workspace-level lints enforce `missing_docs = "warn"` and `missing_debug_implementations = "warn"` with `clippy::pedantic`.

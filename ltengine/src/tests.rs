@@ -1,6 +1,6 @@
 //! Integration tests with mock translation provider.
 
-use crate::backend::{OpenAiProvider, ProviderConfig, ProviderManager, TranslateProvider};
+use crate::backend::{BackendError, ProviderConfig, ProviderManager, TranslateProvider};
 use crate::prompt::PromptBuilder;
 use crate::{Args, QueryText, TranslateRequest, check_params, detect, translate};
 use actix_web::{App, http::StatusCode, test, web};
@@ -11,12 +11,7 @@ struct MockProvider;
 
 #[async_trait::async_trait]
 impl TranslateProvider for MockProvider {
-    async fn translate(
-        &self,
-        _system: &str,
-        _user: &str,
-        _config: &ProviderConfig,
-    ) -> anyhow::Result<String> {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
         Ok("TranslatedText".to_string())
     }
     async fn ping(&self) -> anyhow::Result<()> {
@@ -37,28 +32,19 @@ impl RetryMockProvider {
             fail_count,
         }
     }
-
-    fn call_count(&self) -> u32 {
-        *self.call_count.lock().unwrap()
-    }
 }
 
 #[async_trait::async_trait]
 impl TranslateProvider for RetryMockProvider {
-    async fn translate(
-        &self,
-        _system: &str,
-        _user: &str,
-        _config: &ProviderConfig,
-    ) -> anyhow::Result<String> {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
         let mut count = self.call_count.lock().unwrap();
         let current = *count;
         *count += 1;
         drop(count);
 
         if current < self.fail_count {
-            // Simulate a transient error (e.g., timeout) — retryable
-            Err(anyhow::anyhow!("Simulated timeout (call {})", current))
+            // Simulate a transient retryable error (connection timeout, etc.)
+            Err(BackendError::Retryable(format!("Simulated timeout (call {})", current)).into())
         } else {
             Ok("Finally worked".to_string())
         }
@@ -71,9 +57,8 @@ impl TranslateProvider for RetryMockProvider {
 #[tokio::test]
 async fn test_mock_provider_translate() {
     let provider = MockProvider;
-    let config = ProviderConfig::default();
     let result = provider
-        .translate("You are an expert linguist.", "Hello, world!", &config)
+        .translate("You are an expert linguist.", "Hello, world!")
         .await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "TranslatedText");
@@ -90,48 +75,78 @@ async fn test_prompt_builder() {
     assert!(prompt.user.contains("Hello!"));
 }
 
-/// Test the OpenAiProvider error handling (should fail gracefully without a real server).
-#[tokio::test]
-async fn test_openai_provider_connection_refused() {
-    let provider = OpenAiProvider::new("localhost:59999", "test-model", None);
-    let config = ProviderConfig::default();
-    let result = provider.translate("system", "Hello", &config).await;
-    assert!(result.is_err());
-    // Just verify it fails — the exact error message depends on the network/OS
-    let err_msg = result.unwrap_err().to_string();
-    assert!(!err_msg.is_empty(), "Error should have a message");
-}
-
-/// Test that the RetryMockProvider correctly simulates transient failures:
-/// it should fail the first N calls, then succeed on the (N+1)-th call.
+/// Test that ProviderManager retries correctly on transient (retryable) errors.
+/// This uses RetryMockProvider which fails the first 2 calls, then succeeds.
 #[tokio::test]
 async fn test_retry_on_transient_failures() {
-    // Mock provider fails first 2 times, then succeeds
+    // RetryMockProvider fails first 2 times with Retryable errors, then succeeds
     let provider = RetryMockProvider::new(2);
-    let config = ProviderConfig::default();
+    let call_count = provider.call_count.clone(); // save for assertion
+    let config = ProviderConfig {
+        max_attempts: 3,
+        base_delay_ms: 1, // 1ms to keep the test fast
+        ..Default::default()
+    };
+    let provider_manager = ProviderManager::from_provider(Arc::new(provider), config);
 
-    // First call: should fail
-    let result = provider
-        .translate("You are an expert linguist.", "Hello, world!", &config)
-        .await;
-    assert!(result.is_err());
-
-    // Second call: should fail
-    let result = provider
-        .translate("You are an expert linguist.", "Hello, world!", &config)
-        .await;
-    assert!(result.is_err());
-
-    // Third call: should succeed
-    let result = provider
-        .translate("You are an expert linguist.", "Hello, world!", &config)
+    let result = provider_manager
+        .translate("You are an expert linguist.", "Hello, world!")
         .await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "Finally worked");
+    // Should have tried 3 times (2 failures + 1 success)
     assert_eq!(
-        provider.call_count(),
+        *call_count.lock().unwrap(),
         3,
         "Should have 3 attempts (2 failures + 1 success)"
+    );
+}
+
+/// A mock provider that always returns a permanent (non-retryable) HTTP error.
+struct PermanentErrorProvider;
+
+#[async_trait::async_trait]
+impl TranslateProvider for PermanentErrorProvider {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<String> {
+        Err(BackendError::Http {
+            status_code: 401,
+            detail: "Unauthorized".to_string(),
+        }
+        .into())
+    }
+    async fn ping(&self) -> anyhow::Result<()> {
+        Err(BackendError::Http {
+            status_code: 401,
+            detail: "Unauthorized".to_string(),
+        }
+        .into())
+    }
+}
+
+/// Test that non-retryable errors (auth failure) are returned immediately without retry,
+/// and the provider is dropped.
+#[tokio::test]
+async fn test_permanent_error_drops_provider() {
+    let provider = PermanentErrorProvider;
+    let config = ProviderConfig {
+        max_attempts: 5, // even with many retries, permanent error should not retry
+        base_delay_ms: 1000,
+        ..Default::default()
+    };
+    let provider_manager = ProviderManager::from_provider(Arc::new(provider), config);
+
+    let result = provider_manager
+        .translate("system", "Hello")
+        .await;
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("HTTP error 401"), "Error should mention 401 status");
+
+    // Verify the provider was dropped — get_provider should return None
+    assert!(
+        provider_manager.get_provider().await.is_none(),
+        "Provider should have been dropped after permanent error"
     );
 }
 
