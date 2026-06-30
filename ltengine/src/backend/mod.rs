@@ -344,8 +344,9 @@ impl ProviderManager {
                     }
 
                     // Exponential backoff and retry
-                    let delay =
-                        Duration::from_millis(self.config.base_delay_ms * 2u64.pow(attempt as u32 - 1));
+                    let delay = Duration::from_millis(
+                        self.config.base_delay_ms * 2u64.pow(attempt as u32 - 1),
+                    );
                     eprintln!(
                         "Transient error (attempt {}/{}), retrying in {:?}: {}",
                         attempt, max_attempts, delay, e

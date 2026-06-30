@@ -526,9 +526,8 @@ async fn translate(
         pb.set_source_language(src_lang.name);
 
         for text in q.as_slice() {
-            translated_texts.push(
-                translate_one(text, source, target, &pb, &provider_manager).await?,
-            );
+            translated_texts
+                .push(translate_one(text, source, target, &pb, &provider_manager).await?);
         }
     }
 
@@ -546,10 +545,12 @@ async fn translate(
             serde_json::Value::Array(
                 detected_languages
                     .iter()
-                    .map(|d| serde_json::json!({
-                        "language": d.language.code,
-                        "confidence": d.confidence
-                    }))
+                    .map(|d| {
+                        serde_json::json!({
+                            "language": d.language.code,
+                            "confidence": d.confidence
+                        })
+                    })
                     .collect(),
             )
         } else {

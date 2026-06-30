@@ -4,9 +4,9 @@
 //! or the LLM backend can be used. A factory function creates the appropriate detector
 //! based on the CLI arguments.
 
-use crate::languages::{Language, LangDetect};
-use crate::prompt::PromptBuilder;
 use crate::backend::ProviderManager;
+use crate::languages::{LangDetect, Language};
+use crate::prompt::PromptBuilder;
 
 /// Trait for language detection.
 ///

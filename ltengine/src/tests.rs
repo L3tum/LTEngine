@@ -135,13 +135,14 @@ async fn test_permanent_error_drops_provider() {
     };
     let provider_manager = ProviderManager::from_provider(Arc::new(provider), config);
 
-    let result = provider_manager
-        .translate("system", "Hello")
-        .await;
+    let result = provider_manager.translate("system", "Hello").await;
 
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("HTTP error 401"), "Error should mention 401 status");
+    assert!(
+        err_msg.contains("HTTP error 401"),
+        "Error should mention 401 status"
+    );
 
     // Verify the provider was dropped — get_provider should return None
     assert!(

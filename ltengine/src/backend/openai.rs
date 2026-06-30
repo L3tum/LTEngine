@@ -101,7 +101,8 @@ impl OpenAiProvider {
                         Err(BackendError::Http {
                             status_code: status.as_u16(),
                             detail,
-                        }.into())
+                        }
+                        .into())
                     } else {
                         Err(e.into())
                     }
@@ -123,9 +124,10 @@ impl OpenAiProvider {
     pub async fn ping_backend(&self) -> Result<()> {
         let health_url = format!("{}/health", self.base_url);
         if let Ok(resp) = self.client.get(&health_url).send().await
-            && resp.status().is_success() {
-                return Ok(());
-            }
+            && resp.status().is_success()
+        {
+            return Ok(());
+        }
         Err(anyhow::anyhow!(
             "Backend at {} is not reachable",
             self.base_url
@@ -144,48 +146,51 @@ impl OpenAiProvider {
         let models_url = format!("{}/v1/models", self.base_url);
         if let Ok(resp) = self.client.get(&models_url).send().await
             && resp.status().is_success()
-                && let Ok(json) = resp.json::<serde_json::Value>().await {
-                    if let Some(data) = json["data"].as_array() {
-                        for m in data {
-                            if let Some(id) = m.get("id").and_then(|n| n.as_str()) {
-                                available_models.push(id.to_string());
-                            }
-                        }
-                    }
-                    if !available_models.is_empty() {
-                        return Ok(available_models);
+            && let Ok(json) = resp.json::<serde_json::Value>().await
+        {
+            if let Some(data) = json["data"].as_array() {
+                for m in data {
+                    if let Some(id) = m.get("id").and_then(|n| n.as_str()) {
+                        available_models.push(id.to_string());
                     }
                 }
+            }
+            if !available_models.is_empty() {
+                return Ok(available_models);
+            }
+        }
 
         // Fallback: try Ollama's /api/tags (older versions, or Ollama-specific)
         let ollama_url = format!("{}/api/tags", self.base_url);
         if let Ok(resp) = self.client.get(&ollama_url).send().await
             && resp.status().is_success()
-                && let Ok(json) = resp.json::<serde_json::Value>().await {
-                    if let Some(models) = json["models"].as_array() {
-                        for m in models {
-                            if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
-                                available_models.push(name.to_string());
-                            }
-                        }
-                    }
-                    if !available_models.is_empty() {
-                        return Ok(available_models);
+            && let Ok(json) = resp.json::<serde_json::Value>().await
+        {
+            if let Some(models) = json["models"].as_array() {
+                for m in models {
+                    if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                        available_models.push(name.to_string());
                     }
                 }
+            }
+            if !available_models.is_empty() {
+                return Ok(available_models);
+            }
+        }
 
         // If model enumeration failed, fall back to /health to at least check reachability
         let health_url = format!("{}/health", self.base_url);
         if let Ok(resp) = self.client.get(&health_url).send().await
-            && resp.status().is_success() {
-                // Rate-limit this warning: only log once per 10 seconds
-                static_last_model_enum_warning_check(&format!("{}:{}", self.base_url, self.model));
-                eprintln!(
-                    "Warning: backend at {} is reachable but model enumeration failed, assuming model '{}' is available",
-                    self.base_url, self.model
-                );
-                return Ok(Vec::new()); // backend reachable but we couldn't enumerate models
-            }
+            && resp.status().is_success()
+        {
+            // Rate-limit this warning: only log once per 10 seconds
+            static_last_model_enum_warning_check(&format!("{}:{}", self.base_url, self.model));
+            eprintln!(
+                "Warning: backend at {} is reachable but model enumeration failed, assuming model '{}' is available",
+                self.base_url, self.model
+            );
+            return Ok(Vec::new()); // backend reachable but we couldn't enumerate models
+        }
 
         Err(anyhow::anyhow!(
             "Backend at {} is not reachable",
@@ -206,10 +211,11 @@ fn static_last_model_enum_warning_check(key: &str) {
     let now = std::time::Instant::now();
     let mut map = map.lock().unwrap();
     if let Some(&last) = map.get(key)
-        && now.duration_since(last) < std::time::Duration::from_secs(10) {
-            // Too soon, skip
-            return;
-        }
+        && now.duration_since(last) < std::time::Duration::from_secs(10)
+    {
+        // Too soon, skip
+        return;
+    }
     map.insert(key.to_string(), now);
 }
 
