@@ -277,45 +277,62 @@ pub(crate) async fn run_benchmark(
         "—"
     };
     println!(
-        "\n{:<6} {:<20} {:<10} {:<20} {:<20} {:<8} {:<12} {:<8}",
+        "\n{:<6} {:<16} {:<16} {:<16} {:<10} {:<10} {:<12}",
         "#",
         "Source Lang (GT)",
-        "Target",
         llm_header,
-        "Detected (whatlang)",
+        "Detected (Whatlang)",
+        "Target",
         "BLEU",
-        "Exact",
-        "Correct"
+        "Exact"
     );
 
     for r in &results {
+        let source_name = find_ground_truth_language(&r.source_lang)
+            .unwrap_or(&r.source_lang);
+        let target_name = find_ground_truth_language(&r.target_lang)
+            .unwrap_or(&r.target_lang);
+
         let llm_str = r
             .llm_detection
             .as_ref()
-            .map_or_else(String::new, |d| d.detected.clone());
-        let whatlang_str = r.whatlang_detection.detected.clone();
-        let bleu_str = format!("{:.4}", r.translation.bleu);
-        let exact_str = if r.translation.exact_match {
-            "Yes"
+            .map_or_else(String::new, |d| {
+                let indicator = if d.correct {
+                    "\x1b[32m ✓\x1b[0m"
+                } else {
+                    "\x1b[31m ✗\x1b[0m"
+                };
+                format!("{}{}", d.detected, indicator)
+            });
+        let whatlang_indicator = if r.whatlang_detection.correct {
+            "\x1b[32m ✓\x1b[0m"
         } else {
-            "No"
+            "\x1b[31m ✗\x1b[0m"
         };
-        let correct_str = if r.whatlang_detection.correct {
-            "Yes"
+        let whatlang_str = format!("{}{}", r.whatlang_detection.detected, whatlang_indicator);
+
+        let bleu_val = r.translation.bleu;
+        let bleu_coloured = if bleu_val >= 0.8 {
+            format!("\x1b[32m{:.4}\x1b[0m", bleu_val)
         } else {
-            "No"
+            format!("\x1b[31m{:.4}\x1b[0m", bleu_val)
+        };
+
+        let exact_str = if r.translation.exact_match {
+            "\x1b[32mYes\x1b[0m"
+        } else {
+            "\x1b[31mNo\x1b[0m"
         };
 
         println!(
-            "{:<6} {:<20} {:<10} {:<20} {:<20} {:<8} {:<12} {:<8}",
+            "{:<6} {:<16} {:<16} {:<16} {:<10} {:<10} {:<12}",
             r.idx,
-            r.source_lang,
-            r.target_lang,
+            source_name,
             llm_str,
             whatlang_str,
-            bleu_str,
+            target_name,
+            bleu_coloured,
             exact_str,
-            correct_str,
         );
     }
 
@@ -335,7 +352,6 @@ pub(crate) async fn run_benchmark(
         whatlang_brier
     );
     print!("{}", llm_stats);
-    println!();
     // BLEU explanation
     println!(
         "BLEU score: 0 = no overlap with reference, 1 = perfect match. Score is based on\nn-gram precision (up to 4-grams) with shortest reference length and smoothing."
@@ -382,21 +398,47 @@ fn generate_html_report(
     let rows = results
         .iter()
         .map(|r| {
+            let source_name = find_ground_truth_language(&r.source_lang)
+                .unwrap_or(&r.source_lang);
+            let target_name = find_ground_truth_language(&r.target_lang)
+                .unwrap_or(&r.target_lang);
+
             let llm_str = r
                 .llm_detection
                 .as_ref()
-                .map_or_else(String::new, |d| d.detected.clone());
-            let whatlang_str = &r.whatlang_detection.detected;
-            let bleu_str = format!("{:.4}", r.translation.bleu);
+                .map_or_else(String::new, |d| {
+                    let indicator_class = if d.correct { "green" } else { "red" };
+                    let indicator = if d.correct { " ✓" } else { " ✗" };
+                    format!("{}<span class=\"{}\">{}</span>", d.detected, indicator_class, indicator)
+                });
+            let whatlang_indicator_class = if r.whatlang_detection.correct { "green" } else { "red" };
+            let whatlang_indicator = if r.whatlang_detection.correct { " ✓" } else { " ✗" };
+            let whatlang_str = format!(
+                "{}<span class=\"{}\">{}</span>",
+                r.whatlang_detection.detected,
+                whatlang_indicator_class,
+                whatlang_indicator
+            );
+
+            let bleu_val = r.translation.bleu;
+            let bleu_class = if bleu_val >= 0.8 { "green" } else { "red" };
+            let bleu_str = format!(
+                "<span class=\"{}\">{:.4}</span>",
+                bleu_class, bleu_val
+            );
+
+            let exact_class = if r.translation.exact_match { "green" } else { "red" };
             let exact_str = if r.translation.exact_match {
-                "Yes"
+                format!("<span class=\"{}\">Yes</span>", exact_class)
             } else {
-                "No"
+                format!("<span class=\"{}\">No</span>", exact_class)
             };
+
             // Escape HTML entities for source, reference, and translation
             let source_escaped = r.source.replace('&', "&amp;").replace('<', "&lt;");
             let reference_escaped = r.reference.replace('&', "&amp;").replace('<', "&lt;");
             let translated_escaped = r.translated.replace('&', "&amp;").replace('<', "&lt;");
+
             format!(
                 r#"<tr>
 <td class="clickable">{}</td>
@@ -415,10 +457,10 @@ fn generate_html_report(
 </td>
 </tr>"#,
                 r.idx,
-                r.source_lang,
-                r.target_lang,
+                source_name,
                 llm_str,
                 whatlang_str,
+                target_name,
                 bleu_str,
                 exact_str,
                 source_escaped,
@@ -434,7 +476,11 @@ fn generate_html_report(
         .join(",");
     let labels = results
         .iter()
-        .map(|r| format!("\"{}→{}\"", r.source_lang, r.target_lang))
+        .map(|r| {
+            let s = find_ground_truth_language(&r.source_lang).unwrap_or(&r.source_lang);
+            let t = find_ground_truth_language(&r.target_lang).unwrap_or(&r.target_lang);
+            format!("\"{}→{}\"", s, t)
+        })
         .collect::<Vec<_>>()
         .join(",");
 
