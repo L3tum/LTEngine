@@ -46,12 +46,16 @@ fn find_ground_truth_language(code: &str) -> Option<&str> {
     None
 }
 
+/// Embedded default benchmark dataset (shipped inside the binary).
+const DEFAULT_DATASET: &str = include_str!("../benchmark_dataset.json");
+
 pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<ProviderManager>) {
-    let dataset_path = args
-        .dataset
-        .as_ref()
-        .expect("Dataset path required for benchmark");
-    let dataset = std::fs::read_to_string(dataset_path).expect("Failed to read dataset file");
+    let dataset = match &args.dataset {
+        Some(path) => std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("Failed to read dataset file '{}': {}", path, e)),
+        None => DEFAULT_DATASET.to_string(),
+    };
+
     let items: Vec<BenchmarkItem> =
         serde_json::from_str(&dataset).expect("Failed to parse dataset JSON");
 
