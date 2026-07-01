@@ -24,7 +24,9 @@ cargo build --release   # static musl binary, no GPU features needed
 - `--retry-attempts` — max retry attempts (default 5)
 - `--retry-delay` — base backoff delay in ms (default 1000)
 - `--model-recheck-interval` — periodic model availability recheck interval in seconds (0 to disable, default 30)
-- `--char-limit` — max request length (default 5000)
+- `--char-limit` — maximum total character length of source text; requests exceeding this are rejected (default 50000)
+- `--chunk-size` — maximum size of individual translation chunks (default 5000); text longer than this is chunked
+- `--max-parallel` — max concurrent translation requests per input text when chunked (default 2)
 - `--batch-limit` — max number of strings accepted in JSON `q` arrays (default 50)
 
 The service retries with exponential backoff if the backend is unreachable. Models are NOT auto-downloaded — the backend must have the model pre-loaded.
@@ -67,13 +69,13 @@ All endpoints accept `application/json`, `application/x-www-form-urlencoded`, or
 | GET    | `/languages`      | Returns full language list |
 | GET    | `/health`         | Service health check (always returns 200) |
 | GET    | `/health/backend` | Backend connectivity check (200 OK or 503 error) |
-| GET    | `/frontend/settings` | Returns settings JSON (API key mode, char limit, etc.) |
+| GET    | `/frontend/settings` | Returns settings JSON (API key mode, char limit, chunk size, etc.) |
 | POST   | `/translate_file` | **501 Not Implemented** |
 | POST   | `/suggest`        | **501 Not Implemented** |
 
 Root `/` serves the embedded frontend (Vue2 + Materialize CSS).
 
-**Translation request validation:** `q`, `source`, `target` required. `source` can be `"auto"` (uses `whatlang-rs` for detection). `target` must match a supported language. Character limit enforced. JSON `q` arrays are capped by `--batch-limit`/`LTE_BATCH_LIMIT` (default 50). API key check (if configured) returns 403. Backend auth failure (401) returns 403. Backend model not found (404) returns 404. Transient errors (connection, timeout) are retried.
+**Translation request validation:** `q`, `source`, `target` required. `source` can be `"auto"` (uses `whatlang-rs` for detection). `target` must match a supported language. Total source text length must not exceed `--char-limit` (default 50000) — requests over this are rejected with 400. Text longer than `--chunk-size` (default 5000) is chunked and translated in parallel. JSON `q` arrays are capped by `--batch-limit`/`LTE_BATCH_LIMIT` (default 50). API key check (if configured) returns 403. Backend auth failure (401) returns 403. Backend model not found (404) returns 404. Transient errors (connection, timeout) are retried.
 
 ---
 

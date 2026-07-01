@@ -157,7 +157,9 @@ fn test_args() -> Args {
     Args {
         host: "127.0.0.1".to_string(),
         port: 5050,
-        char_limit: 5000,
+        char_limit: 50000,
+        chunk_size: 5000,
+        max_parallel: 2,
         batch_limit: 50,
         model: "test-model".to_string(),
         backend_host: "localhost:59999".to_string(),
@@ -254,6 +256,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         400
     );
 
+    // Total length over char_limit should be rejected with 400.
     let total_over_limit = TranslateRequest {
         q: Some(QueryText::Batch(vec![
             "Hello".to_string(),
@@ -279,34 +282,7 @@ async fn test_query_text_validation_rejects_empty_blank_and_over_limit_requests(
         .unwrap_err()
         .status,
         400
-    );
-
-    let item_over_limit = TranslateRequest {
-        q: Some(QueryText::Batch(vec![
-            "Hello".to_string(),
-            "World!".to_string(),
-        ])),
-        source: Some("en".to_string()),
-        target: Some("es".to_string()),
-        format: None,
-        api_key: None,
-        alternatives: None,
-        enable_cleanup_reporting: None,
-        enable_performance_reporting: None,
-    };
-    assert_eq!(
-        check_params(
-            &item_over_limit,
-            &args,
-            &[
-                ("source", &item_over_limit.source),
-                ("target", &item_over_limit.target)
-            ]
-        )
-        .unwrap_err()
-        .status,
-        400
-    );
+    ); // Should reject because total length (10) > char_limit (5)
 
     args.batch_limit = 1;
     let batch_over_limit = TranslateRequest {
@@ -527,4 +503,161 @@ async fn test_cleanup_reporting_disabled_no_reports() {
     let resp_omitted: serde_json::Value = test::call_and_read_body_json(&app, req_omitted).await;
     assert_eq!(resp_omitted["translatedText"], "Hellowo-rld");
     assert!(resp_omitted.get("reports").is_none());
+}
+
+/// A mock provider that tracks how many times it's called.
+struct CallCountProvider {
+    call_count: Arc<Mutex<u32>>,
+}
+
+impl CallCountProvider {
+    fn new() -> Self {
+        CallCountProvider {
+            call_count: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TranslateProvider for CallCountProvider {
+    async fn translate(&self, _system: &str, _user: &str) -> anyhow::Result<TranslationResult> {
+        let mut count = self.call_count.lock().unwrap();
+        *count += 1;
+        Ok(TranslationResult {
+            text: format!("Translated chunk {}", *count),
+            backend_timings: None,
+        })
+    }
+    async fn ping(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Test that a long text exceeding chunk_size is chunked and translated in parallel.
+#[actix_web::test]
+async fn test_chunked_translation() {
+    let mut args = test_args();
+    args.chunk_size = 50; // small limit to force chunking
+    args.max_parallel = 2;
+    let provider = CallCountProvider::new();
+    let call_count = provider.call_count.clone();
+    let provider_manager = Arc::new(ProviderManager::from_provider(
+        Arc::new(provider),
+        ProviderConfig::default(),
+    ));
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(Arc::new(args)))
+            .app_data(web::Data::new(provider_manager))
+            .service(translate),
+    )
+    .await;
+
+    // Send a long text (120 chars, will be chunked into 3+ pieces)
+    let req = test::TestRequest::post()
+        .uri("/translate")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(format!(
+            r#"{{"q":"{}","source":"en","target":"es"}}"#,
+            "a".repeat(120)
+        ))
+        .to_request();
+    let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+
+    // The translated text should be the concatenation of chunks (lowercased to match source casing)
+    let translated = resp["translatedText"].as_str().unwrap();
+    // Each chunk is translated to "Translated chunk N" but source is all lowercase, so the translation gets lowercased
+    assert!(
+        translated.contains("translated chunk"),
+        "Should contain translations of all chunks, but got {:?}",
+        translated
+    );
+
+    // Call count should be > 1 (chunked translation)
+    let total_calls = *call_count.lock().unwrap();
+    assert!(
+        total_calls >= 2,
+        "Should have been called multiple times for chunks, but was called {} time(s)",
+        total_calls
+    );
+}
+
+/// Test chunked translation with auto-detection.
+#[actix_web::test]
+async fn test_chunked_translation_auto_detect() {
+    let mut args = test_args();
+    args.chunk_size = 30;
+    args.max_parallel = 2;
+    let provider = CallCountProvider::new();
+    let call_count = provider.call_count.clone();
+    let provider_manager = Arc::new(ProviderManager::from_provider(
+        Arc::new(provider),
+        ProviderConfig::default(),
+    ));
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(Arc::new(args)))
+            .app_data(web::Data::new(provider_manager))
+            .service(translate),
+    )
+    .await;
+
+    let req = test::TestRequest::post()
+        .uri("/translate")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(format!(
+            r#"{{"q":"{}","source":"auto","target":"es"}}"#,
+            "This is a long sentence that exceeds the limit. This is another sentence."
+        ))
+        .to_request();
+    let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+
+    let translated = resp["translatedText"].as_str().unwrap();
+    assert!(!translated.is_empty());
+    let total_calls = *call_count.lock().unwrap();
+    assert!(total_calls >= 2, "Should have chunked the long text");
+}
+
+/// Test that chunking respects paragraph boundaries.
+#[actix_web::test]
+async fn test_chunked_translation_paragraphs() {
+    let mut args = test_args();
+    args.chunk_size = 40;
+    args.max_parallel = 2;
+    let provider = CallCountProvider::new();
+    let call_count = provider.call_count.clone();
+    let provider_manager = Arc::new(ProviderManager::from_provider(
+        Arc::new(provider),
+        ProviderConfig::default(),
+    ));
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(Arc::new(args)))
+            .app_data(web::Data::new(provider_manager))
+            .service(translate),
+    )
+    .await;
+
+    let req = test::TestRequest::post()
+        .uri("/translate")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(
+            r#"{"q":"First paragraph with some content.\n\nSecond paragraph with more content that should be separated.","source":"en","target":"es"}"#,
+        )
+        .to_request();
+    let resp: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+
+    let translated = resp["translatedText"].as_str().unwrap();
+    assert!(
+        translated.contains("Translated chunk"),
+        "Should contain translated chunks"
+    );
+    let total_calls = *call_count.lock().unwrap();
+    assert_eq!(
+        total_calls, 3,
+        "Should have 3 chunks (1st para, 2nd para split into 2 by fixed-size)"
+    );
 }

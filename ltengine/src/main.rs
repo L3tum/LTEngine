@@ -49,9 +49,17 @@ struct Args {
     #[arg(short, long, env = "LTE_PORT", default_value_t = 5050)]
     port: u16,
 
-    /// Character limit for translation requests (env var: LTE_CHAR_LIMIT)
-    #[arg(long, env = "LTE_CHAR_LIMIT", default_value_t = 5000)]
+    /// Maximum total character length of all source text; rejects if exceeded (env var: LTE_CHAR_LIMIT)
+    #[arg(long, env = "LTE_CHAR_LIMIT", default_value_t = 50000)]
     char_limit: usize,
+
+    /// Maximum size of individual translation chunks (env var: LTE_CHUNK_SIZE)
+    #[arg(long, env = "LTE_CHUNK_SIZE", default_value_t = 5000)]
+    chunk_size: usize,
+
+    /// Maximum number of concurrent translation requests per input text (env var: LTE_MAX_PARALLEL)
+    #[arg(long, env = "LTE_MAX_PARALLEL", default_value_t = 2)]
+    max_parallel: usize,
 
     /// Maximum number of strings accepted in JSON q arrays (env var: LTE_BATCH_LIMIT)
     #[arg(long, env = "LTE_BATCH_LIMIT", default_value_t = 50)]
@@ -309,7 +317,7 @@ fn check_params(
     if request_len > args.char_limit {
         return Err(ErrorResponse {
             error: format!(
-                "Invalid request: request ({}) exceeds text limit ({})",
+                "Invalid request: total text length ({}) exceeds maximum allowed ({})",
                 request_len, args.char_limit
             ),
             status: 400,
@@ -317,6 +325,127 @@ fn check_params(
     }
 
     Ok(true)
+}
+
+/// Chunk a long text into smaller pieces, preferring paragraph boundaries,
+/// then sentence boundaries (". "), and finally fixed-size fallback.
+fn chunk_text(text: &str, max_size: usize) -> Vec<String> {
+    // If text fits in one chunk, just return it.
+    if text.len() <= max_size {
+        return vec![text.to_string()];
+    }
+    // First try to split on paragraph boundaries (two or more newlines).
+    let paragraphs: Vec<&str> = text
+        .split("\n\n")
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+
+    if paragraphs.len() > 1 {
+        // Group paragraphs without exceeding max_size.
+        let mut chunks = Vec::new();
+        let mut current_chunk = String::new();
+        for para in paragraphs.iter() {
+            let para_str = para.trim();
+            if current_chunk.is_empty() {
+                current_chunk = para_str.to_string();
+            } else if (format!("{0}\n\n{1}", current_chunk, para_str)).len() <= max_size {
+                current_chunk = format!("{0}\n\n{1}", current_chunk, para_str);
+            } else {
+                chunks.push(current_chunk);
+                current_chunk = para_str.to_string();
+            }
+        }
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk);
+        }
+
+        // Recursively handle any oversized chunks.
+        let mut final_chunks = Vec::new();
+        for chunk in chunks {
+            if chunk.len() > max_size {
+                final_chunks.extend(chunk_text(&chunk, max_size));
+            } else {
+                final_chunks.push(chunk);
+            }
+        }
+        return final_chunks;
+    }
+
+    // No paragraph boundaries. Try sentence splitting on ". " or ".\n".
+    let sentences: Vec<String> = text
+        .split(". ")
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| {
+            if s.trim().ends_with('.') {
+                s.trim().to_string()
+            } else {
+                format!("{}.", s.trim())
+            }
+        })
+        .collect();
+
+    if sentences.len() > 1 {
+        let mut chunks = Vec::new();
+        let mut current_chunk = String::new();
+        for sent in &sentences {
+            if current_chunk.is_empty() {
+                current_chunk = sent.clone();
+            } else if (format!("{0} {1}", current_chunk, sent)).len() <= max_size {
+                current_chunk = format!("{0} {1}", current_chunk, sent);
+            } else {
+                chunks.push(current_chunk);
+                current_chunk = sent.clone();
+            }
+        }
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk);
+        }
+
+        let mut final_chunks = Vec::new();
+        for chunk in chunks {
+            if chunk.len() > max_size {
+                final_chunks.extend(chunk_text(&chunk, max_size));
+            } else {
+                final_chunks.push(chunk);
+            }
+        }
+        return final_chunks;
+    }
+
+    // No sentence boundaries either. Fixed-size character chunks, trying to break at sentence boundary.
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+    loop {
+        if remaining.len() <= max_size {
+            chunks.push(remaining.trim().to_string());
+            break;
+        }
+        // Find the last ". " within the first max_size characters
+        let window: String = remaining.chars().take(max_size).collect();
+        if let Some(pos) = window.rfind(". ") {
+            let cut_point = pos + 2;
+            chunks.push(window[..cut_point].trim().to_string());
+            remaining = &remaining[cut_point..];
+        } else {
+            // No sentence boundary found, just cut at max_size but avoid mid-word cuts
+            let cut_window: String = remaining.chars().take(max_size).collect();
+            // Find the last space to avoid cutting a word in half
+            let last_space = cut_window.rfind(' ').unwrap_or(cut_window.chars().count());
+            let mut trimmed = cut_window[..last_space].trim().to_string();
+            if trimmed.is_empty() {
+                trimmed = cut_window
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(&cut_window)
+                    .to_string();
+            }
+            chunks.push(trimmed);
+            let consumed = last_space; // consume up to the last space (not including the space itself)
+            remaining = &remaining[consumed..];
+        }
+    }
+    chunks.retain(|c| !c.is_empty());
+    chunks
 }
 
 fn improve_formatting(q: &str, translation: &str) -> String {
@@ -561,13 +690,13 @@ async fn translate(
     let mut translate_per_text_ms: Vec<u64> = Vec::with_capacity(q.as_slice().len());
     let mut backend_timings: Vec<Option<BackendTimings>> = Vec::with_capacity(q.as_slice().len());
 
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_parallel));
+
     if source == "auto" {
         // Use LLM-based detection if enabled, otherwise fall back to whatlang.
-        // We detect language first, then translate with the detected language.
         let detector = create_detector(&args, &provider_manager);
 
         for text in q.as_slice() {
-            // Detection time is already captured inside detector.detect() and stored in detect_time_ms.
             let detected = detector.detect(text).await;
             detect_per_text_ms.push(detected.detect_time_ms);
 
@@ -575,20 +704,74 @@ async fn translate(
             detected_languages.push(detected.clone());
 
             let start = Instant::now();
-            let (translated, removed, replaced, timing) = translate_one_with_cleanup(
-                text,
-                detected.language.internal_code,
-                target,
-                &pb,
-                &provider_manager,
-                args.disable_cleanup,
-            )
-            .await?;
-            translate_per_text_ms.push(start.elapsed().as_millis() as u64);
-            backend_timings.push(timing);
-            translated_texts.push(translated);
-            total_cleanup_removed += removed;
-            total_cleanup_replaced += replaced;
+            let chunks = chunk_text(text, args.chunk_size);
+            if chunks.len() == 1 {
+                // Single chunk, translate directly (no chunking)
+                let (translated, removed, replaced, timing) = translate_one_with_cleanup(
+                    text,
+                    detected.language.internal_code,
+                    target,
+                    &pb,
+                    &provider_manager,
+                    args.disable_cleanup,
+                )
+                .await?;
+                translate_per_text_ms.push(start.elapsed().as_millis() as u64);
+                backend_timings.push(timing);
+                translated_texts.push(translated);
+                total_cleanup_removed += removed;
+                total_cleanup_replaced += replaced;
+            } else {
+                // Chunked translation — dispatch in parallel
+                let detected_code = detected.language.internal_code;
+                let disable_cleanup = args.disable_cleanup;
+                let pm_for_chunks = provider_manager.clone();
+                let pb_for_chunks = pb.clone();
+                let futures: Vec<_> = chunks
+                    .into_iter()
+                    .map(|chunk| {
+                        let permit = Arc::clone(&semaphore);
+                        let pm = pm_for_chunks.clone();
+                        let pb = pb_for_chunks.clone();
+                        async move {
+                            let _permit = permit.acquire().await;
+                            translate_one_with_cleanup(
+                                &chunk,
+                                detected_code,
+                                target,
+                                &pb,
+                                &pm,
+                                disable_cleanup,
+                            )
+                            .await
+                        }
+                    })
+                    .collect();
+
+                let results = futures::future::join_all(futures).await;
+                let mut translated_parts = Vec::new();
+                let mut chunk_timings: Vec<Option<BackendTimings>> = Vec::new();
+                let mut chunk_removed = 0usize;
+                let mut chunk_replaced = 0usize;
+
+                for result in results {
+                    let (translated, removed, replaced, timing) = result?;
+                    translated_parts.push(translated);
+                    chunk_timings.push(timing);
+                    chunk_removed += removed;
+                    chunk_replaced += replaced;
+                }
+
+                let combined = translated_parts.join("\n");
+                // Don't apply improve_formatting to chunked text — just join.
+                translate_per_text_ms.push(start.elapsed().as_millis() as u64);
+                // Use the timing from the last chunk (approximate), flatten the Option<Option<T>>
+                let last_timing = chunk_timings.last().cloned().flatten();
+                backend_timings.push(last_timing);
+                translated_texts.push(combined);
+                total_cleanup_removed += chunk_removed;
+                total_cleanup_replaced += chunk_replaced;
+            }
         }
     } else {
         // Source is explicitly specified, no detection is performed.
@@ -600,20 +783,72 @@ async fn translate(
 
         for text in q.as_slice() {
             let start = Instant::now();
-            let (translated, removed, replaced, timing) = translate_one_with_cleanup(
-                text,
-                source,
-                target,
-                &pb,
-                &provider_manager,
-                args.disable_cleanup,
-            )
-            .await?;
-            translate_per_text_ms.push(start.elapsed().as_millis() as u64);
-            backend_timings.push(timing);
-            translated_texts.push(translated);
-            total_cleanup_removed += removed;
-            total_cleanup_replaced += replaced;
+            let chunks = chunk_text(text, args.chunk_size);
+            if chunks.len() == 1 {
+                // Single chunk
+                let (translated, removed, replaced, timing) = translate_one_with_cleanup(
+                    text,
+                    source,
+                    target,
+                    &pb,
+                    &provider_manager,
+                    args.disable_cleanup,
+                )
+                .await?;
+                translate_per_text_ms.push(start.elapsed().as_millis() as u64);
+                backend_timings.push(timing);
+                translated_texts.push(translated);
+                total_cleanup_removed += removed;
+                total_cleanup_replaced += replaced;
+            } else {
+                // Chunked translation — dispatch in parallel
+                let disable_cleanup = args.disable_cleanup;
+                let pm_for_chunks = provider_manager.clone();
+                let pb_for_chunks = pb.clone();
+                let futures: Vec<_> = chunks
+                    .into_iter()
+                    .map(|chunk| {
+                        let permit = Arc::clone(&semaphore);
+                        let pm = pm_for_chunks.clone();
+                        let pb = pb_for_chunks.clone();
+                        let source_clone = source.clone();
+                        async move {
+                            let _permit = permit.acquire().await;
+                            translate_one_with_cleanup(
+                                &chunk,
+                                &source_clone,
+                                target,
+                                &pb,
+                                &pm,
+                                disable_cleanup,
+                            )
+                            .await
+                        }
+                    })
+                    .collect();
+
+                let results = futures::future::join_all(futures).await;
+                let mut translated_parts = Vec::new();
+                let mut chunk_timings: Vec<Option<BackendTimings>> = Vec::new();
+                let mut chunk_removed = 0usize;
+                let mut chunk_replaced = 0usize;
+
+                for result in results {
+                    let (translated, removed, replaced, timing) = result?;
+                    translated_parts.push(translated);
+                    chunk_timings.push(timing);
+                    chunk_removed += removed;
+                    chunk_replaced += replaced;
+                }
+
+                let combined = translated_parts.join("\n");
+                translate_per_text_ms.push(start.elapsed().as_millis() as u64);
+                let last_timing = chunk_timings.last().cloned().flatten();
+                backend_timings.push(last_timing);
+                translated_texts.push(combined);
+                total_cleanup_removed += chunk_removed;
+                total_cleanup_replaced += chunk_replaced;
+            }
         }
     }
 
@@ -723,6 +958,7 @@ async fn get_frontend_settings(args: web::Data<Arc<Args>>) -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
         "apiKeys": false,
         "charLimit": args.char_limit,
+        "chunkSize": args.chunk_size,
         "filesTranslation": false,
         "frontendTimeout": 1000,
         "keyRequired": false,
@@ -837,4 +1073,98 @@ async fn main() -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod chunk_tests {
+    use super::chunk_text;
+
+    #[test]
+    fn test_chunk_text_empty() {
+        let chunks = chunk_text("", 100);
+        assert_eq!(chunks, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn test_chunk_text_small() {
+        let chunks = chunk_text("Hello, world!", 100);
+        assert_eq!(chunks, vec!["Hello, world!".to_string()]);
+    }
+
+    #[test]
+    fn test_chunk_text_exact_size() {
+        let text = "a".repeat(21);
+        assert_eq!(text.len(), 21);
+        let chunks = chunk_text(&text, 21);
+        assert_eq!(chunks, vec![text]);
+    }
+
+    #[test]
+    fn test_chunk_text_over_limit_fixed_fallback() {
+        // Long string with no paragraph or sentence boundaries
+        let text = "a".repeat(120);
+        let chunks = chunk_text(&text, 50);
+        assert_eq!(chunks.len(), 3); // 50 + 50 + 20
+        assert_eq!(chunks[0].len(), 50);
+        assert_eq!(chunks[1].len(), 50);
+        assert_eq!(chunks[2].len(), 20);
+        assert_eq!(chunks.join(""), text);
+    }
+
+    #[test]
+    fn test_chunk_text_by_paragraphs() {
+        let text = "First paragraph line 1. Line 2.\n\nSecond paragraph. More text.";
+        let chunks = chunk_text(text, 31); // first para is 30 bytes, so 31 should fit
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "First paragraph line 1. Line 2.");
+        assert_eq!(chunks[1], "Second paragraph. More text.");
+    }
+
+    #[test]
+    fn test_chunk_text_by_paragraphs_merging() {
+        // Two paragraphs that fit together under the limit
+        let text = "Short para.\n\nAnother short.";
+        let chunks = chunk_text(text, 100);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "Short para.\n\nAnother short.");
+    }
+
+    #[test]
+    fn test_chunk_text_by_paragraphs_over_limit_fallback() {
+        // Two paragraphs, but first one exceeds the limit when combined with second
+        let text = "Very long paragraph with lots of content that exceeds limit.\n\nAnother short.";
+        let chunks = chunk_text(text, 60);
+        // First paragraph alone is 55 chars, plus the newline and second para (13 chars) = 68 chars > 60
+        // So first para should be its own chunk, second para its own chunk
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].len() <= 60);
+        assert!(chunks[1].len() <= 60);
+    }
+
+    #[test]
+    fn test_chunk_text_by_sentences() {
+        let text = "First sentence. Second sentence. Third sentence.";
+        let chunks = chunk_text(text, 20);
+        // "First sentence." is 15 chars, " Second sentence." is 16 chars, etc.
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], "First sentence.");
+        assert_eq!(chunks[1], "Second sentence.");
+        assert_eq!(chunks[2], "Third sentence.");
+    }
+
+    #[test]
+    fn test_chunk_text_mixed() {
+        let text = "Para 1. Short.\n\nPara 2 is a very long paragraph that will be split into sentences because it exceeds the chunk size when combined with other paragraphs, and then further split if needed.";
+        let chunks = chunk_text(text, 50);
+        assert!(chunks.len() >= 2);
+        for chunk in &chunks {
+            assert!(
+                chunk.len() <= 50,
+                "Chunk exceeds limit: {} chars",
+                chunk.len()
+            );
+        }
+        // The first chunk should be the short paragraph
+        assert_eq!(chunks[0], "Para 1. Short.");
+    }
 }

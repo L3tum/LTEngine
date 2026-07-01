@@ -10,7 +10,7 @@ use super::{BackendError, TranslateProvider};
 
 /// Flexible backend timing data (e.g., from llama.cpp).
 /// Captures arbitrary timing keys like prompt_n, predicted_ms, etc.
-#[derive(Deserialize, Debug, Serialize, Default)]
+#[derive(Deserialize, Debug, Serialize, Default, Clone)]
 pub struct BackendTimings {
     #[serde(flatten)]
     additional: HashMap<String, serde_json::Value>,

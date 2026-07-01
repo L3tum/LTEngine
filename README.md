@@ -182,7 +182,9 @@ If the backend becomes unreachable during operation:
   --retry-attempts 5 \
   --retry-delay 1000 \
   --model-recheck-interval 30 \
-  --char-limit 5000 \
+  --char-limit 50000 \
+  --chunk-size 5000 \
+  --max-parallel 2 \
   --batch-limit 50
 ```
 
@@ -199,7 +201,9 @@ All CLI options can also be configured via environment variables (with CLI argum
 | `--retry-attempts` | `LTE_RETRY_ATTEMPTS` | Max retry attempts for provider creation and translation | `5` |
 | `--retry-delay` | `LTE_RETRY_DELAY` | Base delay in ms for exponential backoff | `1000` |
 | `--model-recheck-interval` | `LTE_MODEL_RECHECK_INTERVAL` | Seconds between periodic model availability rechecks (0 to disable) | `30` |
-| `--char-limit` | `LTE_CHAR_LIMIT` | Maximum character limit for translation requests | `5000` |
+| `--char-limit` | `LTE_CHAR_LIMIT` | Maximum total source text length; requests exceeding this are rejected with 400 | `50000` |
+| `--chunk-size` | `LTE_CHUNK_SIZE` | Maximum size of individual translation chunks; text longer than this is chunked | `5000` |
+| `--max-parallel` | `LTE_MAX_PARALLEL` | Maximum concurrent translation requests per input text when chunked | `2` |
 | `--batch-limit` | `LTE_BATCH_LIMIT` | Maximum number of strings accepted in JSON `q` arrays | `50` |
 
 ### Environment Variables Example

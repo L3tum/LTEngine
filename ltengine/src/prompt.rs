@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PromptBuilder {
     source_language: &'static str,
     target_language: &'static str,
