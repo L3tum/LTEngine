@@ -620,7 +620,7 @@ async fn translate(
     let mut response =
         serde_json::json!({"translatedText": q.shaped_translated_text(translated_texts)});
 
-    // For compatibility with LibreTranslate API.
+    // For API compatibility with the original LibreTranslate project.
     if body.alternatives.is_some_and(|v| v > 0) {
         response["alternatives"] = q.shaped_empty_alternatives();
     }

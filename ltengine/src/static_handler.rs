@@ -1,4 +1,4 @@
-//! Embedded static file handler — serves the LibreTranslate frontend.
+//! Embedded static file handler — serves the LTEngine frontend.
 //!
 //! Replaces `actix-web-static-files` to avoid duplicate dependencies
 //! (`derive_more` 0.99 vs 2.x, `static-files` 0.2 vs 0.3).

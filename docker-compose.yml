@@ -1,7 +1,7 @@
 services:
   # LTEngine translation API
   ltengine:
-    image: ghcr.io/libretranslate/ltengine:main
+    image: ghcr.io/l3tum/ltengine:main
     container_name: ltengine
     restart: unless-stopped
     ports:

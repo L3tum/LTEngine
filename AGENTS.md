@@ -1,6 +1,6 @@
 # LTEngine — AGENTS.md (Cheat Sheet)
 
-**What:** Local, self-hosted AI machine translation API (Rust), LibreTranslate-compatible, powered by an external inference backend via the OpenAI `/chat/completions` API (e.g., Ollama, vLLM, llama.cpp server).  
+**What:** Local, self-hosted AI machine translation API (Rust), LibreTranslate API-compatible, powered by an external inference backend via the OpenAI `/chat/completions` API (e.g., Ollama, vLLM, llama.cpp server).  
 **License:** AGPL-3.0. **Edition:** Rust 2024. **Default port:** 5050.
 
 ---
@@ -40,7 +40,7 @@ LTEngine/
 ├── ltengine/               # the actual crate
 │   ├── Cargo.toml          # dependencies (no GPU features)
 │   ├── build.rs            # embeds `./resources` via `static_files` into binary
-│   ├── resources/          # LibreTranslate frontend (Vue2 + Materialize)
+│   ├── resources/          # LTEngine frontend (originally based on LibreTranslate Vue2 + Materialize)
 │   └── src/
 │       ├── main.rs         # CLI args, HTTP routes, health endpoints
 │       ├── backend.rs      # TranslateProvider trait, OpenAiProvider, ProviderManager with retry/recheck
@@ -56,7 +56,7 @@ LTEngine/
 
 ---
 
-## API Endpoints (LibreTranslate-compatible)
+## API Endpoints (LibreTranslate API-compatible)
 
 All endpoints accept `application/json`, `application/x-www-form-urlencoded`, or `multipart/form-data`.
 
@@ -132,13 +132,13 @@ After translation, the function:
 - **Language detection weak for short texts** — plan to port LexiLang to Rust.
 - **No CLI inference mode** — currently only server mode.
 - **Not available as a library** — no Python bindings yet.
-- **No benchmarks** — need comparison with proprietary software.
+- **Benchmark mode** — existing benchmark with built-in dataset can be expanded.
 
 ---
 
 ## Docker
 
-- **Image:** `ghcr.io/libretranslate/ltengine:main` (built from `Dockerfile`, fully static musl binary).
+- **Image:** `ghcr.io/l3tum/ltengine:main` (built from `Dockerfile`, fully static musl binary).
 - **Environment:** `MODEL` (model ID), `BACKEND_HOST` (default `localhost:11434`), `HF_HOME` (unused, legacy).
 - **docker-compose.yml** includes an optional Ollama service with GPU reservation.
 
@@ -197,4 +197,4 @@ All of these are integrated into the GitHub Actions CI pipeline (`build.yml`). I
 - Workspace-level lints enforce `missing_docs = "warn"` and `missing_debug_implementations = "warn"` with `clippy::pedantic`.
 - Add missing documentation to public items. All error enums/structs need `Debug`.
 - Use `Result`/`anyhow` for error propagation; `thiserror` for custom error types.
-- Frontend is LibreTranslate's original Vue2 + Materialize CSS (static files, not a separate app).
+- Frontend is originally based on the LibreTranslate Vue2 + Materialize CSS (static files, not a separate app).

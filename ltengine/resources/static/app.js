@@ -69,11 +69,6 @@ document.addEventListener('DOMContentLoaded', function(){
                     } else {
                         langsRequest.onload = function() {
                             handleLangsResponse(self, this);
-
-                            var hostname = window.location.hostname.toLowerCase();
-                            if (hostname.indexOf("libretranslate.") === 0 && !hostname.endsWith(".com")){
-                                self.error = "This website might be in violation of our trademark guidelines: https://github.com/LibreTranslate/LibreTranslate/blob/main/TRADEMARK.md";
-                            }
                         }
                     }
                 } else {
@@ -541,7 +536,7 @@ function handleLangsResponse(self, response) {
 function handleNotification(title, body) {
   new Notification(title, {
       body,
-      tag: 'libretranslate'
+      tag: 'ltengine'
   });
 }
 

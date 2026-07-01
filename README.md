@@ -1,10 +1,10 @@
 # LTEngine
 
-Free and Open Source Local AI Machine Translation API, written in Rust, entirely self-hosted and compatible with [LibreTranslate](https://github.com/LibreTranslate/LibreTranslate). Its translation capabilities are powered by large language models (LLMs) running on an external inference server that supports the OpenAI chat completions API (e.g., [Ollama](https://ollama.com/), [vLLM](https://github.com/vllm-project/vllm), [llama.cpp](https://github.com/ggml-org/llama.cpp) server).
+Free and Open Source Local AI Machine Translation API, written in Rust, entirely self-hosted and **compatible with the LibreTranslate API**. Its translation capabilities are powered by large language models (LLMs) running on an external inference server that supports the OpenAI chat completions API (e.g., [Ollama](https://ollama.com/), [vLLM](https://github.com/vllm-project/vllm), [llama.cpp](https://github.com/ggml-org/llama.cpp) server).
+
+> **Fork with extensive redesign and feature work.** This project was forked from the original [LibreTranslate/LTEngine](https://github.com/LibreTranslate/LTEngine) repository and has been significantly reworked with new features, improvements, and independent development. Public Docker images are available at [`ghcr.io/l3tum/ltengine`](https://github.com/l3tum/LTEngine/pkgs/container/ltengine).
 
 ![Translation](https://github.com/user-attachments/assets/37dd4e20-382b-459d-bcc1-5de3ed4b4c18)
-
-The LLMs in LTEngine are much larger than the lightweight transformer models in [LibreTranslate](https://github.com/LibreTranslate/LibreTranslate). Thus memory usage and speed are traded off for quality of outputs, which for some languages has been reported as being [on par or better than DeepL](https://community.libretranslate.com/t/ltengine-llm-powered-local-machine-translation/1862/5).
 
 > ⚠️ LTEngine is in active development. Check the [Roadmap](#roadmap) for current limitations.
 
@@ -25,7 +25,7 @@ The LLMs in LTEngine are much larger than the lightweight transformer models in 
 ## Build
 
 ```bash
-git clone https://github.com/LibreTranslate/LTEngine
+git clone https://github.com/l3tum/LTEngine
 cd LTEngine
 cargo build --release
 ```
@@ -88,7 +88,7 @@ Response:
 }
 ```
 
-For JSON requests, `q` can also be an array of strings for LibreTranslate-compatible batch translation:
+For JSON requests, `q` can also be an array of strings for batch translation (API-compatible with the original LibreTranslate project):
 
 ```javascript
 {
@@ -214,9 +214,50 @@ export LTE_API_KEY="my-secret-key"
 ./target/release/ltengine
 ```
 
-## Language Bindings
+## Benchmark Mode
 
-You can use the LTEngine API using the following bindings:
+LTEngine includes a benchmark mode that evaluates translation quality and speed against a dataset. This is useful for comparing models and measuring performance.
+
+### Running Benchmarks
+
+The benchmark feature is enabled by default (feature flag `benchmark`). It uses [bleuscore](https://crates.io/crates/bleuscore) for BLEU score calculation.
+
+```bash
+# Run with built-in dataset, plain text output
+./target/release/ltengine --backend-host localhost:11434 -m gemma3-4b --benchmark text
+
+# Run with custom dataset, generate HTML report
+./target/release/ltengine --benchmark html --dataset my_dataset.json
+
+# Or via environment variables
+LTE_BENCHMARK=text ./target/release/ltengine --backend-host localhost:11434 -m gemma3-4b
+
+# HTML report
+LTE_BENCHMARK=html LTE_DATASET=my_dataset.json ./target/release/ltengine --backend-host localhost:11434 -m gemma3-4b
+```
+
+**Options:**
+- `--benchmark text|html` — output mode: `text` prints a plain text report to stdout; `html` generates an HTML report (`benchmark_report.html`) in the current directory
+- `--dataset <path>` — path to a custom dataset JSON file (optional, uses a built-in default if not provided)
+
+The benchmark runs through a set of source texts with known translations, compares results using BLEU scoring, and reports overall quality metrics. The HTML report includes a table of per-language BLEU scores.
+
+### Dataset Format
+
+Dataset files are JSON arrays of translation pairs:
+
+```json
+[
+  {
+    "source": "Hello, world!",
+    "target": "¡Hola, mundo!",
+    "source_lang": "en",
+    "target_lang": "es"
+  }
+]
+```
+
+You can use the LTEngine API using the following bindings (they work due to API compatibility with the original LibreTranslate project):
 
 - Rust: <https://github.com/DefunctLizard/libretranslate-rs>
 - Node.js: <https://github.com/franciscop/translate>
@@ -241,16 +282,17 @@ You can use the LTEngine API using the following bindings:
  - [x] Model availability validation at startup
  - [x] Health check endpoints (`/health`, `/health/backend`)
  - [x] Fully static Docker image (musl, no dynamic dependencies)
+ - [x] Benchmark mode with BLEU score and HTML reports
  - [ ] Add support for `/translate_file` (ability to translate files).
  - [ ] Add support for sentence splitting. Currently text is sent to the LLM as-is, but longer texts (like documents) should be split into chunks, translated and merged back.
  - [ ] Better language detection for short texts (port [LexiLang](https://github.com/LibreTranslate/LexiLang) to Rust)
- - [ ] Create comparative benchmarks between LTEngine and proprietary software.
  - [ ] Add support for command line inference (run `./ltengine translate` as a command line app separate from `./ltengine server`)
  - [ ] Make ltengine available as a library, possibly creating bindings for other languages like Python.
  - [x] Automated builds / CI
  - [x] Configurable retry logic with exponential backoff
  - [x] Periodic model availability re-checking with auto-recovery
  - [x] Resilience against initial backend unreachability (no crash on startup)
+ - [ ] Expand benchmark datasets for more comprehensive model comparison.
  - [ ] Your ideas? We welcome contributions.
 
 ## Contributing
@@ -264,7 +306,3 @@ This project uses Rust crates for HTTP communication (reqwest) and language dete
 ## License
 
 [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0.en.html)
-
-## Trademark
-
-See [Trademark Guidelines](https://github.com/LibreTranslate/LibreTranslate/blob/main/TRADEMARK.md)
