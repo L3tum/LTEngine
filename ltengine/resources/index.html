@@ -139,6 +139,7 @@
 									<i class="material-icons">swap_horiz</i>
 								</a>
 								<span id="targetLangLabel">Translate into</span>
+								<span class="timing-info" v-if="timingDisplay">[[ timingDisplay ]]</span>
 								<select aria-labelledby="targetLangLabel" class="browser-default" v-model="targetLang" ref="targetLangDropdown" @change="handleInput">
 									<template v-for="option in targetLangs">
 										<option v-if="option.code !== 'auto'" :value="option.code">[[ option.name ]]</option>
@@ -165,6 +166,7 @@
 									Translated text
 								</label>
 								<textarea id="textarea2" v-model="translatedText" ref="translatedTextarea" dir="auto" v-bind:readonly="suggestions && !isSuggesting" :disabled="disableInput"></textarea>
+								<span class="cleanup-info" v-if="cleanupDisplay">[[ cleanupDisplay ]]</span>
 									<div class="actions">
 										<button v-if="suggestions && !loadingTranslation && inputText.length && !isSuggesting" class="btn-action" @click="suggestTranslation" aria-label="Suggest translation">
 											<i class="material-icons">edit</i>

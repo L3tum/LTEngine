@@ -258,6 +258,21 @@ select {
   color: #666;
   pointer-events: none;
 }
+
+.timing-info {
+  color: #666;
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+}
+
+.cleanup-info {
+  position: absolute;
+  bottom: 1rem;
+  left: 1.5rem;
+  color: #666;
+  font-size: 0.85rem;
+  pointer-events: none;
+}
 .actions {
   position: absolute;
   right: 1.25rem;

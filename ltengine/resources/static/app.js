@@ -127,6 +127,38 @@ document.addEventListener('DOMContentLoaded', function(){
             }
         },
         computed: {
+            timingDisplay: function(){
+                if (!this.output) return '';
+                try {
+                    var res = JSON.parse(this.output);
+                    if (!res.reports || !res.reports.performance) return '';
+                    var perf = res.reports.performance;
+                    var detectMs = perf.detect ? perf.detect.total_ms : null;
+                    var translateMs = perf.translate.total_ms;
+                    var s = '';
+                    if (detectMs !== null) {
+                        s += (detectMs / 1000).toFixed(1) + 's · ';
+                    }
+                    s += (translateMs / 1000).toFixed(1) + 's';
+                    return s;
+                } catch(e) {
+                    return '';
+                }
+            },
+            cleanupDisplay: function(){
+                if (!this.output) return '';
+                try {
+                    var res = JSON.parse(this.output);
+                    if (!res.reports || !res.reports.cleanup) return '';
+                    var c = res.reports.cleanup;
+                    if (c.removed > 0 || c.replaced > 0) {
+                        return 'removed: ' + c.removed + ', replaced: ' + c.replaced;
+                    }
+                } catch(e) {
+                    console.warn('Failed to parse cleanup display', e);
+                }
+                return '';
+            },
             requestCode: function(){
                 return ['const res = await fetch("' + this.BaseUrl + '/translate", {',
                     '	method: "POST",',
@@ -277,12 +309,14 @@ document.addEventListener('DOMContentLoaded', function(){
                             }
                         } catch (e) {
                             self.error = e.message;
+                            self.output = '';
                             self.loadingTranslation = false;
                         }
                     };
 
                     request.onerror = function() {
                         self.error = "Cannot load /translate";
+                        self.output = '';
                         self.loadingTranslation = false;
                     };
 
