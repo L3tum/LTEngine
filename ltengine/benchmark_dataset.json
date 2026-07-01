@@ -136,5 +136,59 @@
     "source_language": "fr",
     "target_language": "en",
     "reference": "The best is the enemy of the good."
+  },
+  {
+    "source": "When you reach the end of your rope, tie a knot in it and hang on. The most beautiful people we've known have been those who have known suffering, known loss, known struggle, known grief, known from within, and have found their way back.",
+    "source_language": "en",
+    "target_language": "es",
+    "reference": "Cuando llegues al final de tu hilo, haz un nudo y colgátele. Las personas más hermosas que hemos conocido han sido aquellas que han conocido el sufrimiento, han conocido la pérdida, han conocido la lucha, han conocido el duelo, han conocido desde dentro, y han encontrado su camino de regreso."
+  },
+  {
+    "source": "Il est difficile d'écrire la vérité, car la vérité est un labyrinthe sans porte de sortie, et ceux qui tentent de la décrire tombent dans des pièges de langage qui la transforment en mensonge.",
+    "source_language": "fr",
+    "target_language": "en",
+    "reference": "It is difficult to write the truth, because the truth is a labyrinth without an exit, and those who try to describe it fall into language traps that turn it into a lie."
+  },
+  {
+    "source": "Was wir in unserer Kindheit hören und sehen, prägt uns unser ganzes Leben lang, und wir tragen diese Bilder wie unsichtbare Lasten mit uns, selbst wenn wir längst vergessen haben, wo wir sie aufgesammelt haben.",
+    "source_language": "de",
+    "target_language": "en",
+    "reference": "What we hear and see in our childhood shapes us for the rest of our lives, and we carry these images like invisible burdens with us, even though we have long forgotten where we gathered them."
+  },
+  {
+    "source": "Hun forstod endelig, at kærlighed ikke er noget, der sker for en, men noget, man selv må skabe dag for dag gennem handling, tålmodighed og mod.",
+    "source_language": "da",
+    "target_language": "en",
+    "reference": "She finally understood that love is not something that happens to you, but something you must create for yourself day by day through action, patience, and courage."
+  },
+  {
+    "source": "この世の全ての喜びは行動から生まれ、全ての喜びもまた行動から生まれる。行動に結びついていない喜びは、幻想でしかない。",
+    "source_language": "ja",
+    "target_language": "en",
+    "reference": "All the joys of this world come from action, and all joys also come from action. Joys unconnected to action are nothing but illusions."
+  },
+  {
+    "source": "我们都在寻找一个属于自己的故事，但有时最真实的故事就是那些被忽略的日常片段——清晨的一杯咖啡，傍晚的微风，以及深夜里的一盏孤灯。",
+    "source_language": "zh",
+    "target_language": "en",
+    "reference": "We are all searching for a story of our own, but sometimes the most real stories are those everyday fragments we overlook—a cup of coffee in the morning, a breeze in the evening, and a solitary lamp deep into the night."
+  },
+  {
+    "source": "Многие из нас проводят целые жизни, ожидая того, что может никогда не произойти, вместо того чтобы создать то, что действительно может изменить их судьбу прямо сейчас.",
+    "source_language": "ru",
+    "target_language": "en",
+    "reference": "Many of us spend entire lives waiting for something that may never happen, instead of creating what can truly change our destiny right now."
+  },
+  {
+    "source": "Ella sabía que el pasado siempre regresaba, no como un fantasma, sino como un eco suave que se deslizaba entre sus pensamientos, recordándole que el olvido es solo una ilusión. Por eso decidió que cada día sería un nuevo comienzo, un lienzo en blanco donde el destino aún no había escrito nada.",
+    "source_language": "es",
+    "target_language": "en",
+    "reference": "She knew that the past always returned, not like a ghost, but as a soft echo that slipped between her thoughts, reminding her that forgetting is only an illusion. That's why she decided that each day would be a new beginning, a blank canvas where destiny had not yet written anything."
+  },
+  {
+    "source": "Nous avons souvent tendance à penser que le bonheur est une destination, un endroit où l'on arrive un jour. Or il se révèle être un chemin, fait d'étapes incertaines, de regards échangés, et de silences complices.",
+    "source_language": "fr",
+    "target_language": "en",
+    "reference": "We often tend to think that happiness is a destination, a place where we eventually arrive. Yet it turns out to be a path, made of uncertain steps, of exchanged glances, and of complicit silences."
   }
 ]

@@ -1,12 +1,13 @@
 //! Benchmark module for evaluating translation accuracy and detection confidence calibration.
 //!
-//! Uses the `blue` crate for proper sentence-level BLEU with Moses-style tokenization.
+//! Uses the `bleuscore` crate for proper sentence-level BLEU with Moses-style tokenization.
 
 use crate::backend::ProviderManager;
 use crate::detection::{LanguageDetector, parse_detection_response};
 use crate::languages::LANGUAGES;
 use crate::prompt::PromptBuilder;
 use bleuscore::{RefLenMethod, compute_score};
+use std::io::{IsTerminal, Write};
 use std::sync::Arc;
 
 #[derive(serde::Deserialize, Debug)]
@@ -35,6 +36,10 @@ struct ItemResult {
     llm_detection: Option<DetectionResult>,
     whatlang_detection: DetectionResult,
     translation: TranslationResult,
+    // Stored for HTML report
+    source: String,
+    reference: String,
+    translated: String,
 }
 
 fn find_ground_truth_language(code: &str) -> Option<&str> {
@@ -49,7 +54,15 @@ fn find_ground_truth_language(code: &str) -> Option<&str> {
 /// Embedded default benchmark dataset (shipped inside the binary).
 const DEFAULT_DATASET: &str = include_str!("../benchmark_dataset.json");
 
-pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<ProviderManager>) {
+/// Embedded HTML report template (shipped inside the binary).
+const HTML_TEMPLATE: &str = include_str!("benchmark_report.html");
+
+/// Run benchmark and produce either a text report or an HTML file.
+pub(crate) async fn run_benchmark(
+    args: &crate::Args,
+    benchmark_mode: &crate::BenchmarkMode,
+    provider_manager: &Arc<ProviderManager>,
+) {
     let dataset = match &args.dataset {
         Some(path) => std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("Failed to read dataset file '{}': {}", path, e)),
@@ -61,6 +74,8 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
 
     let use_llm_detect = args.llm_detect;
     let mut results = Vec::new();
+    let total = items.len();
+    let is_terminal = std::io::stdout().is_terminal();
 
     for (i, item) in items.iter().enumerate() {
         let gt_lang =
@@ -151,6 +166,40 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
         let bleu = res.bleu;
         let exact_match = translated.trim() == item.reference.trim();
 
+        // Show progress line (overwrite previous if interactive)
+        let progress = if use_llm_detect {
+            let llm_det_str = llm_det.as_ref().map_or_else(String::new, |d| {
+                format!(" ({} {}%)", d.detected, d.confidence)
+            });
+            format!(
+                "Processing {}/{}: {} → {} [LLM: {} | Whatlang: {} {}%]  ",
+                i + 1,
+                total,
+                item.source_language,
+                item.target_language,
+                llm_det_str,
+                whatlang_det.detected,
+                whatlang_det.confidence
+            )
+        } else {
+            format!(
+                "Processing {}/{}: {} → {} [Detected: {} {}%]  ",
+                i + 1,
+                total,
+                item.source_language,
+                item.target_language,
+                whatlang_det.detected,
+                whatlang_det.confidence
+            )
+        };
+        if is_terminal {
+            print!("\r\033[K");
+            print!("{}", progress);
+            std::io::stdout().flush().ok();
+        } else {
+            println!("{}", progress);
+        }
+
         results.push(ItemResult {
             idx: i + 1,
             source_lang: item.source_language.clone(),
@@ -158,60 +207,18 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
             llm_detection: llm_det,
             whatlang_detection: whatlang_det,
             translation: TranslationResult { bleu, exact_match },
+            source: item.source.clone(),
+            reference: item.reference.clone(),
+            translated: translated.clone(),
         });
     }
 
-    // Print full table
-    println!("\n=== Benchmark Results ===");
-    let llm_header = if use_llm_detect {
-        "Detected (LLM)"
-    } else {
-        "—"
-    };
-    println!(
-        "\n{:<6} {:<20} {:<10} {:<20} {:<20} {:<8} {:<12} {:<8}",
-        "#",
-        "Source Lang (GT)",
-        "Target",
-        llm_header,
-        "Detected (whatlang)",
-        "BLEU",
-        "Exact",
-        "Correct"
-    );
-
-    for r in &results {
-        let llm_str = r
-            .llm_detection
-            .as_ref()
-            .map_or_else(String::new, |d| d.detected.clone());
-        let whatlang_str = r.whatlang_detection.detected.clone();
-        let bleu_str = format!("{:.4}", r.translation.bleu);
-        let exact_str = if r.translation.exact_match {
-            "Yes"
-        } else {
-            "No"
-        };
-        let correct_str = if r.whatlang_detection.correct {
-            "Yes"
-        } else {
-            "No"
-        };
-
-        println!(
-            "{:<6} {:<20} {:<10} {:<20} {:<20} {:<8} {:<12} {:<8}",
-            r.idx,
-            r.source_lang,
-            r.target_lang,
-            llm_str,
-            whatlang_str,
-            bleu_str,
-            exact_str,
-            correct_str,
-        );
+    // Move past the progress line
+    if is_terminal {
+        println!(); // newline after the progress line
     }
 
-    // Summary
+    // Compute summary statistics once (used for both text output and HTML report)
     let total = results.len();
     let bleu_avg: f64 = results.iter().map(|r| r.translation.bleu).sum::<f64>() / total as f64;
     let exact_count = results.iter().filter(|r| r.translation.exact_match).count();
@@ -262,6 +269,56 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
         String::new()
     };
 
+    // Always print text output to CLI (progress + results table + summary + explanation)
+    println!("=== Benchmark Results ===");
+    let llm_header = if use_llm_detect {
+        "Detected (LLM)"
+    } else {
+        "—"
+    };
+    println!(
+        "\n{:<6} {:<20} {:<10} {:<20} {:<20} {:<8} {:<12} {:<8}",
+        "#",
+        "Source Lang (GT)",
+        "Target",
+        llm_header,
+        "Detected (whatlang)",
+        "BLEU",
+        "Exact",
+        "Correct"
+    );
+
+    for r in &results {
+        let llm_str = r
+            .llm_detection
+            .as_ref()
+            .map_or_else(String::new, |d| d.detected.clone());
+        let whatlang_str = r.whatlang_detection.detected.clone();
+        let bleu_str = format!("{:.4}", r.translation.bleu);
+        let exact_str = if r.translation.exact_match {
+            "Yes"
+        } else {
+            "No"
+        };
+        let correct_str = if r.whatlang_detection.correct {
+            "Yes"
+        } else {
+            "No"
+        };
+
+        println!(
+            "{:<6} {:<20} {:<10} {:<20} {:<20} {:<8} {:<12} {:<8}",
+            r.idx,
+            r.source_lang,
+            r.target_lang,
+            llm_str,
+            whatlang_str,
+            bleu_str,
+            exact_str,
+            correct_str,
+        );
+    }
+
     println!("\n=== Summary ===");
     println!(
         "Translation: BLEU = {:.4}, Exact match rate = {:.1}% ({} / {})",
@@ -279,4 +336,124 @@ pub(crate) async fn run_benchmark(args: &crate::Args, provider_manager: &Arc<Pro
     );
     print!("{}", llm_stats);
     println!();
+    // BLEU explanation
+    println!(
+        "BLEU score: 0 = no overlap with reference, 1 = perfect match. Score is based on\nn-gram precision (up to 4-grams) with shortest reference length and smoothing."
+    );
+
+    // If HTML mode, also generate the HTML report file
+    if matches!(benchmark_mode, crate::BenchmarkMode::Html) {
+        generate_html_report(
+            &results,
+            total,
+            use_llm_detect,
+            bleu_avg,
+            exact_count,
+            exact_rate,
+            whatlang_correct,
+            whatlang_acc,
+            whatlang_brier,
+            &llm_stats,
+        );
+    }
+}
+
+/// Generate a self-contained HTML report using an embedded template.
+#[allow(clippy::too_many_arguments)]
+fn generate_html_report(
+    results: &[ItemResult],
+    total: usize,
+    use_llm_detect: bool,
+    bleu_avg: f64,
+    exact_count: usize,
+    exact_rate: f64,
+    whatlang_correct: usize,
+    whatlang_acc: f64,
+    whatlang_brier: f64,
+    llm_stats: &str,
+) {
+    let llm_acc = if use_llm_detect {
+        llm_stats.trim_start_matches('\n').trim().to_string()
+    } else {
+        String::new()
+    };
+
+    // Build the table rows and data/labels for the chart
+    let rows = results
+        .iter()
+        .map(|r| {
+            let llm_str = r
+                .llm_detection
+                .as_ref()
+                .map_or_else(String::new, |d| d.detected.clone());
+            let whatlang_str = &r.whatlang_detection.detected;
+            let bleu_str = format!("{:.4}", r.translation.bleu);
+            let exact_str = if r.translation.exact_match {
+                "Yes"
+            } else {
+                "No"
+            };
+            // Escape HTML entities for source, reference, and translation
+            let source_escaped = r.source.replace('&', "&amp;").replace('<', "&lt;");
+            let reference_escaped = r.reference.replace('&', "&amp;").replace('<', "&lt;");
+            let translated_escaped = r.translated.replace('&', "&amp;").replace('<', "&lt;");
+            format!(
+                r#"<tr>
+<td class="clickable">{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+</tr>
+<tr>
+<td colspan="7" class="detail">
+<label>Source:</label><span>{}</span>
+<label>Reference:</label><span>{}</span>
+<label>LLM Translation:</label><span>{}</span>
+</td>
+</tr>"#,
+                r.idx,
+                r.source_lang,
+                r.target_lang,
+                llm_str,
+                whatlang_str,
+                bleu_str,
+                exact_str,
+                source_escaped,
+                reference_escaped,
+                translated_escaped,
+            )
+        })
+        .collect::<String>();
+    let data = results
+        .iter()
+        .map(|r| format!("{:.4}", r.translation.bleu))
+        .collect::<Vec<_>>()
+        .join(",");
+    let labels = results
+        .iter()
+        .map(|r| format!("\"{}→{}\"", r.source_lang, r.target_lang))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Use manual string replacement with named placeholders
+    let html = HTML_TEMPLATE
+        .replace("{{bleu_avg}}", &format!("{:.4}", bleu_avg))
+        .replace("{{exact_rate}}", &format!("{:.1}%", exact_rate * 100.0))
+        .replace("{{exact_count}}", &exact_count.to_string())
+        .replace("{{total}}", &total.to_string())
+        .replace("{{whatlang_acc}}", &format!("{:.1}%", whatlang_acc * 100.0))
+        .replace("{{whatlang_correct}}", &whatlang_correct.to_string())
+        .replace("{{whatlang_brier}}", &format!("{:.4}", whatlang_brier))
+        .replace("{__llm_stats__}", &llm_acc)
+        .replace("{__data__}", &data)
+        .replace("{__labels__}", &labels)
+        .replace("{__rows__}", &rows);
+
+    // Write to file
+    let filename = "benchmark_report.html";
+    std::fs::write(filename, &html).expect("Failed to write HTML report");
+    println!("HTML report generated: {}", filename);
 }

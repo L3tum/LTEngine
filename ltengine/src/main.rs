@@ -3,7 +3,7 @@ use actix_web::{
     App, FromRequest, HttpRequest, HttpResponse, HttpServer, Responder, get, http::header, post,
     web,
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -28,6 +28,15 @@ use detection::create_detector;
 use error_response::ErrorResponse;
 use languages::{LANGUAGES, get_language_from_code};
 use prompt::PromptBuilder;
+
+#[derive(Parser, Debug, Clone, Default, ValueEnum)]
+enum BenchmarkMode {
+    /// Print benchmark results as plain text (default)
+    #[default]
+    Text,
+    /// Generate a self-contained HTML report with charts and expandable details
+    Html,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -84,9 +93,9 @@ struct Args {
     #[arg(long = "llm-detect", env = "LTE_LLM_DETECT", action)]
     llm_detect: bool,
 
-    /// Run a benchmark against a dataset and exit (env var: LTE_BENCHMARK)
-    #[arg(long, env = "LTE_BENCHMARK", action)]
-    benchmark: bool,
+    /// Run a benchmark against a dataset and exit (env var: LTE_BENCHMARK). Options: "text" or "html"
+    #[arg(long, env = "LTE_BENCHMARK")]
+    benchmark: Option<BenchmarkMode>,
 
     /// Path to the benchmark dataset JSON file (env var: LTE_DATASET)
     #[arg(long, env = "LTE_DATASET")]
@@ -763,10 +772,10 @@ async fn main() -> std::io::Result<()> {
     provider_manager.initialize().await;
 
     // If benchmark mode, run the benchmark and exit
-    if args.benchmark {
+    if let Some(benchmark_mode) = &args.benchmark {
         #[cfg(feature = "benchmark")]
         {
-            benchmark::run_benchmark(&args, &provider_manager).await;
+            benchmark::run_benchmark(&args, benchmark_mode, &provider_manager).await;
         }
         #[cfg(not(feature = "benchmark"))]
         {

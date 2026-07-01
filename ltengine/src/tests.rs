@@ -167,7 +167,7 @@ fn test_args() -> Args {
         retry_delay: 1,
         model_recheck_interval: 0,
         llm_detect: false,
-        benchmark: false,
+        benchmark: None,
         dataset: None,
         disable_cleanup: false,
     }
