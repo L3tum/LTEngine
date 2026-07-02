@@ -3,8 +3,11 @@
 use crate::backend::{
     BackendError, ProviderConfig, ProviderManager, TranslateProvider, TranslationResult,
 };
+use crate::cli::Args;
+use crate::detect::detect;
 use crate::prompt::PromptBuilder;
-use crate::{Args, QueryText, TranslateRequest, check_params, detect, translate};
+use crate::request::{QueryText, TranslateRequest, check_params};
+use crate::translate::translate;
 use actix_web::{App, http::StatusCode, test, web};
 use std::sync::{Arc, Mutex};
 

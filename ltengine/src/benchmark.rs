@@ -3,6 +3,7 @@
 //! Uses the `bleuscore` crate for proper sentence-level BLEU with Moses-style tokenization.
 
 use crate::backend::ProviderManager;
+use crate::cli::{Args, BenchmarkMode};
 use crate::detection::{LanguageDetector, parse_detection_response};
 use crate::languages::LANGUAGES;
 use crate::prompt::PromptBuilder;
@@ -59,8 +60,8 @@ const HTML_TEMPLATE: &str = include_str!("benchmark_report.html");
 
 /// Run benchmark and produce either a text report or an HTML file.
 pub(crate) async fn run_benchmark(
-    args: &crate::Args,
-    benchmark_mode: &crate::BenchmarkMode,
+    args: &Args,
+    benchmark_mode: &BenchmarkMode,
     provider_manager: &Arc<ProviderManager>,
 ) {
     let dataset = match &args.dataset {
@@ -341,7 +342,7 @@ pub(crate) async fn run_benchmark(
     );
 
     // If HTML mode, also generate the HTML report file
-    if matches!(benchmark_mode, crate::BenchmarkMode::Html) {
+    if matches!(benchmark_mode, BenchmarkMode::Html) {
         generate_html_report(
             &results,
             total,
