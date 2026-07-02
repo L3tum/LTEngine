@@ -278,32 +278,21 @@ pub(crate) async fn run_benchmark(
     };
     println!(
         "\n{:<6} {:<16} {:<16} {:<16} {:<10} {:<10} {:<12}",
-        "#",
-        "Source Lang (GT)",
-        llm_header,
-        "Detected (Whatlang)",
-        "Target",
-        "BLEU",
-        "Exact"
+        "#", "Source Lang (GT)", llm_header, "Detected (Whatlang)", "Target", "BLEU", "Exact"
     );
 
     for r in &results {
-        let source_name = find_ground_truth_language(&r.source_lang)
-            .unwrap_or(&r.source_lang);
-        let target_name = find_ground_truth_language(&r.target_lang)
-            .unwrap_or(&r.target_lang);
+        let source_name = find_ground_truth_language(&r.source_lang).unwrap_or(&r.source_lang);
+        let target_name = find_ground_truth_language(&r.target_lang).unwrap_or(&r.target_lang);
 
-        let llm_str = r
-            .llm_detection
-            .as_ref()
-            .map_or_else(String::new, |d| {
-                let indicator = if d.correct {
-                    "\x1b[32m ✓\x1b[0m"
-                } else {
-                    "\x1b[31m ✗\x1b[0m"
-                };
-                format!("{}{}", d.detected, indicator)
-            });
+        let llm_str = r.llm_detection.as_ref().map_or_else(String::new, |d| {
+            let indicator = if d.correct {
+                "\x1b[32m ✓\x1b[0m"
+            } else {
+                "\x1b[31m ✗\x1b[0m"
+            };
+            format!("{}{}", d.detected, indicator)
+        });
         let whatlang_indicator = if r.whatlang_detection.correct {
             "\x1b[32m ✓\x1b[0m"
         } else {
@@ -326,13 +315,7 @@ pub(crate) async fn run_benchmark(
 
         println!(
             "{:<6} {:<16} {:<16} {:<16} {:<10} {:<10} {:<12}",
-            r.idx,
-            source_name,
-            llm_str,
-            whatlang_str,
-            target_name,
-            bleu_coloured,
-            exact_str,
+            r.idx, source_name, llm_str, whatlang_str, target_name, bleu_coloured, exact_str,
         );
     }
 
@@ -398,36 +381,41 @@ fn generate_html_report(
     let rows = results
         .iter()
         .map(|r| {
-            let source_name = find_ground_truth_language(&r.source_lang)
-                .unwrap_or(&r.source_lang);
-            let target_name = find_ground_truth_language(&r.target_lang)
-                .unwrap_or(&r.target_lang);
+            let source_name = find_ground_truth_language(&r.source_lang).unwrap_or(&r.source_lang);
+            let target_name = find_ground_truth_language(&r.target_lang).unwrap_or(&r.target_lang);
 
-            let llm_str = r
-                .llm_detection
-                .as_ref()
-                .map_or_else(String::new, |d| {
-                    let indicator_class = if d.correct { "green" } else { "red" };
-                    let indicator = if d.correct { " ✓" } else { " ✗" };
-                    format!("{}<span class=\"{}\">{}</span>", d.detected, indicator_class, indicator)
-                });
-            let whatlang_indicator_class = if r.whatlang_detection.correct { "green" } else { "red" };
-            let whatlang_indicator = if r.whatlang_detection.correct { " ✓" } else { " ✗" };
+            let llm_str = r.llm_detection.as_ref().map_or_else(String::new, |d| {
+                let indicator_class = if d.correct { "green" } else { "red" };
+                let indicator = if d.correct { " ✓" } else { " ✗" };
+                format!(
+                    "{}<span class=\"{}\">{}</span>",
+                    d.detected, indicator_class, indicator
+                )
+            });
+            let whatlang_indicator_class = if r.whatlang_detection.correct {
+                "green"
+            } else {
+                "red"
+            };
+            let whatlang_indicator = if r.whatlang_detection.correct {
+                " ✓"
+            } else {
+                " ✗"
+            };
             let whatlang_str = format!(
                 "{}<span class=\"{}\">{}</span>",
-                r.whatlang_detection.detected,
-                whatlang_indicator_class,
-                whatlang_indicator
+                r.whatlang_detection.detected, whatlang_indicator_class, whatlang_indicator
             );
 
             let bleu_val = r.translation.bleu;
             let bleu_class = if bleu_val >= 0.8 { "green" } else { "red" };
-            let bleu_str = format!(
-                "<span class=\"{}\">{:.4}</span>",
-                bleu_class, bleu_val
-            );
+            let bleu_str = format!("<span class=\"{}\">{:.4}</span>", bleu_class, bleu_val);
 
-            let exact_class = if r.translation.exact_match { "green" } else { "red" };
+            let exact_class = if r.translation.exact_match {
+                "green"
+            } else {
+                "red"
+            };
             let exact_str = if r.translation.exact_match {
                 format!("<span class=\"{}\">Yes</span>", exact_class)
             } else {

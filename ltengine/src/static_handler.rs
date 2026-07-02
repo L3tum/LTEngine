@@ -4,6 +4,7 @@
 //! (`derive_more` 0.99 vs 2.x, `static-files` 0.2 vs 0.3).
 
 use actix_web::{HttpRequest, HttpResponse, Result as ActixResult};
+use percent_encoding::percent_decode_str;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -63,12 +64,10 @@ pub async fn serve_static(req: HttpRequest) -> ActixResult<HttpResponse> {
         return Ok(HttpResponse::NotFound().finish());
     }
 
-    // For normal file paths, look up directly (remove leading `/`)
-    let lookup_path = if let Some(stripped) = path.strip_prefix('/') {
-        stripped
-    } else {
-        path
-    };
+    // For normal file paths, URL-decode and remove leading `/`
+    let path_to_decode = path.strip_prefix('/').unwrap_or(path);
+    let decoded_path = percent_decode_str(path_to_decode).decode_utf8_lossy();
+    let lookup_path = decoded_path.as_ref();
 
     if let Some(file) = generated.get(lookup_path) {
         let mime = get_mime_type(lookup_path);
