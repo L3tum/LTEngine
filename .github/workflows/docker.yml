@@ -19,7 +19,7 @@ jobs:
     secrets:
       PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
   build-gchr:
-    if: github.server_url == "https://github.com"
+    if: github.server_url == 'https://github.com'
     uses: l3tum/reusable-workflows/.github/workflows/publish-gchr.yml@main
     runs-on: ubuntu-latest
     with:
