@@ -11,10 +11,12 @@ on:
 
 jobs:
   debug:
-    run: |
-      cat <<'EOF'
-      ${{ toJSON(github) }}
-      EOF
+     steps:
+        - name: print
+          run: |
+            cat <<'EOF'
+            ${{ toJSON(github) }}
+            EOF
   build-forgejo:
     if: github.server_url != 'https://github.com'
     uses: l3tum/reusable-workflows/.github/workflows/publish-forgejo.yml@main
