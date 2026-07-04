@@ -287,6 +287,7 @@ You can use the LTEngine API using the following bindings (they work due to API 
  - [x] Health check endpoints (`/health`, `/health/backend`)
  - [x] Fully static Docker image (musl, no dynamic dependencies)
  - [x] Benchmark mode with BLEU score and HTML reports
+ - [x] Add support to select tone for translation
  - [ ] Add support for `/translate_file` (ability to translate files).
  - [ ] Add support for sentence splitting. Currently text is sent to the LLM as-is, but longer texts (like documents) should be split into chunks, translated and merged back.
  - [ ] Better language detection for short texts (port [LexiLang](https://github.com/LibreTranslate/LexiLang) to Rust)
