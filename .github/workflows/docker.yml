@@ -18,11 +18,14 @@ jobs:
       - id: push_check
         run: |
           if [ "$GITHUB_EVENT_NAME" = "release" ] && [ "$GITHUB_EVENT_ACTION" = "published" ]; then
+            echo "should_push=true"
             echo "should_push=true" >> "$GITHUB_OUTPUT"
           else
+            echo "should_push=false"
             echo "should_push=false" >> "$GITHUB_OUTPUT"
           fi
   build-forgejo:
+    needs: [should-push]
     if: github.server_url != 'https://github.com'
     uses: l3tum/reusable-workflows/.github/workflows/publish-forgejo.yml@main
     with:
@@ -30,6 +33,7 @@ jobs:
     secrets:
       PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
   build-gchr:
+    needs: [should-push]
     if: github.server_url == 'https://github.com'
     uses: l3tum/reusable-workflows/.github/workflows/publish-gchr.yml@main
     with:
