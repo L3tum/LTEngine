@@ -288,8 +288,9 @@ You can use the LTEngine API using the following bindings (they work due to API 
  - [x] Fully static Docker image (musl, no dynamic dependencies)
  - [x] Benchmark mode with BLEU score and HTML reports
  - [x] Add support to select tone for translation
+ - [x] Add support for chunking to support larger texts
  - [ ] Add support for `/translate_file` (ability to translate files).
- - [ ] Add support for sentence splitting. Currently text is sent to the LLM as-is, but longer texts (like documents) should be split into chunks, translated and merged back.
+ - [ ] Add support for sentence splitting/line splitting similar to DeepL.
  - [ ] Better language detection for short texts (port [LexiLang](https://github.com/LibreTranslate/LexiLang) to Rust)
  - [ ] Add support for command line inference (run `./ltengine translate` as a command line app separate from `./ltengine server`)
  - [ ] Make ltengine available as a library, possibly creating bindings for other languages like Python.
