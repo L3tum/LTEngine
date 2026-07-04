@@ -10,23 +10,27 @@ on:
       - published
 
 jobs:
-  debug:
-     runs-on: ubuntu-latest
-     steps:
-        - name: print
-          run: |
-            cat <<'EOF'
-            ${{ toJSON(github) }}
-            EOF
+  should-push:
+    runs-on: ubuntu-latest
+    outputs:
+      should_push: ${{ steps.push_check.outputs.should_push }}
+    steps:
+      - id: push_check
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ] && [ "$GITHUB_EVENT_ACTION" = "published" ]; then
+            echo "should_push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_push=false" >> "$GITHUB_OUTPUT"
+          fi
   build-forgejo:
     if: github.server_url != 'https://github.com'
     uses: l3tum/reusable-workflows/.github/workflows/publish-forgejo.yml@main
     with:
-      PUSH: "${{ github.event_name == 'release' && github.event.action == 'published' }}"
+      PUSH: ${{ needs.should-push.outputs.should_push }}
     secrets:
       PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
   build-gchr:
     if: github.server_url == 'https://github.com'
     uses: l3tum/reusable-workflows/.github/workflows/publish-gchr.yml@main
     with:
-      PUSH: "${{ github.event_name == 'release' && github.event.action == 'published' }}"
+      PUSH: ${{ needs.should-push.outputs.should_push }}
