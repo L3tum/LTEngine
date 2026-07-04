@@ -282,41 +282,60 @@ pub(crate) async fn run_benchmark(
         "#", "Source Lang (GT)", llm_header, "Detected (Whatlang)", "Target", "BLEU", "Exact"
     );
 
+    // Helper: pad raw text then wrap with colour, so ANSI codes don't distort column width
+    fn coloured<T: std::fmt::Display>(raw: T, code: &str) -> String {
+        format!("\x1b[{}m{}\x1b[0m", code, raw)
+    }
+
     for r in &results {
         let source_name = find_ground_truth_language(&r.source_lang).unwrap_or(&r.source_lang);
         let target_name = find_ground_truth_language(&r.target_lang).unwrap_or(&r.target_lang);
 
-        let llm_str = r.llm_detection.as_ref().map_or_else(String::new, |d| {
-            let indicator = if d.correct {
-                "\x1b[32m ✓\x1b[0m"
-            } else {
-                "\x1b[31m ✗\x1b[0m"
-            };
-            format!("{}{}", d.detected, indicator)
-        });
+        // LLM detection: padded raw text + colored indicator
+        let llm_raw = r
+            .llm_detection
+            .as_ref()
+            .map_or_else(String::new, |d| d.detected.clone());
+        let llm_indicator = if r.llm_detection.as_ref().is_some_and(|d| d.correct) {
+            "✓"
+        } else {
+            "✗"
+        };
+        let llm_str = format!("{:<16}{}", llm_raw, coloured(llm_indicator, "32"));
+
+        // Whatlang detection: same
+        let whatlang_raw = r.whatlang_detection.detected.clone();
         let whatlang_indicator = if r.whatlang_detection.correct {
-            "\x1b[32m ✓\x1b[0m"
+            "✓"
         } else {
-            "\x1b[31m ✗\x1b[0m"
+            "✗"
         };
-        let whatlang_str = format!("{}{}", r.whatlang_detection.detected, whatlang_indicator);
+        let whatlang_str = format!("{:<16}{}", whatlang_raw, coloured(whatlang_indicator, "32"));
 
+        // BLEU: pad raw value to 10, then color the whole cell
         let bleu_val = r.translation.bleu;
-        let bleu_coloured = if bleu_val >= 0.8 {
-            format!("\x1b[32m{:.4}\x1b[0m", bleu_val)
+        let bleu_raw = format!("{:.4}", bleu_val);
+        let bleu_str = if bleu_val >= 0.8 {
+            coloured(bleu_raw, "32")
         } else {
-            format!("\x1b[31m{:.4}\x1b[0m", bleu_val)
+            coloured(bleu_raw, "31")
         };
 
-        let exact_str = if r.translation.exact_match {
-            "\x1b[32mYes\x1b[0m"
+        // Exact: padded raw, then colored
+        let exact_raw = if r.translation.exact_match {
+            "Yes"
         } else {
-            "\x1b[31mNo\x1b[0m"
+            "No"
+        };
+        let exact_str = if r.translation.exact_match {
+            coloured(exact_raw, "32")
+        } else {
+            coloured(exact_raw, "31")
         };
 
         println!(
-            "{:<6} {:<16} {:<16} {:<16} {:<10} {:<10} {:<12}",
-            r.idx, source_name, llm_str, whatlang_str, target_name, bleu_coloured, exact_str,
+            "{:<6} {:<16} {} {:<16} {:<10} {} {}",
+            r.idx, source_name, llm_str, whatlang_str, target_name, bleu_str, exact_str,
         );
     }
 
