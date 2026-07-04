@@ -3,6 +3,7 @@ pub struct PromptBuilder {
     source_language: &'static str,
     target_language: &'static str,
     format: String,
+    tone: Option<String>,
 }
 
 #[derive(Debug)]
@@ -17,7 +18,13 @@ impl PromptBuilder {
             source_language: "auto",
             target_language: "English",
             format: "text".to_string(),
+            tone: None,
         }
+    }
+
+    pub fn set_tone(&mut self, tone: Option<&str>) -> &mut PromptBuilder {
+        self.tone = tone.map(|s| s.to_string());
+        self
     }
 
     pub fn set_format(&mut self, format: &str) -> &mut PromptBuilder {
@@ -36,11 +43,21 @@ impl PromptBuilder {
     }
 
     pub fn build(&self, q: &String) -> Prompt {
-        let system = if self.format == "html" {
+        let base_system = if self.format == "html" {
             "You are an expert linguist, specializing in translation. You are able to capture the nuances of the languages you translate. You pay attention to masculine/feminine/plural and proper use of articles and grammar. You always provide natural sounding translations that fully preserve the meaning of the original text. You never provide explanations for your work. You must preserve all HTML tags and elements in the translation. You always answer with the translated text and nothing else."
         } else {
             "You are an expert linguist, specializing in translation. You are able to capture the nuances of the languages you translate. You pay attention to masculine/feminine/plural and proper use of articles and grammar. You always provide natural sounding translations that fully preserve the meaning of the original text. You never provide explanations for your work. You always answer with the translated text and nothing else."
-        }.to_string();
+        };
+
+        // ponytail: hardcoded tone instructions; a lookup map if more tones needed
+        let tone_instruction = match self.tone.as_deref() {
+            Some("formal") => "Translate in a formal, professional style.",
+            Some("informal") => "Translate in a casual, colloquial style.",
+            Some("neutral") | None => "",
+            _ => "",
+        };
+
+        let system = format!("{} {}", base_system, tone_instruction.trim_end());
 
         let user = (if self.source_language == "auto" {
             format!(

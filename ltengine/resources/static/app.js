@@ -40,7 +40,8 @@ document.addEventListener('DOMContentLoaded', function(){
             loadingFileTranslation: false,
             translatedFileUrl: false,
             filesTranslation: true,
-            frontendTimeout: 500
+            frontendTimeout: 500,
+            tone: "neutral"
         },
         mounted: function() {
             const self = this;
@@ -58,6 +59,7 @@ document.addEventListener('DOMContentLoaded', function(){
                     self.settings = JSON.parse(this.response);
                     self.sourceLang = self.settings.language.source.code;
                     self.targetLang = self.settings.language.target.code;
+                    self.tone = self.settings.tone ? self.settings.tone[0] : "neutral";
                     self.charactersLimit = self.settings.charLimit;
                     self.suggestions = self.settings.suggestions;
                     self.supportedFilesFormat = self.settings.supportedFilesFormat;
@@ -120,6 +122,10 @@ document.addEventListener('DOMContentLoaded', function(){
             if (this.$refs.targetLangDropdown) {
                 updateSelectedAttribute(this.$refs.targetLangDropdown, this.targetLang);
             }
+
+            if (this.$refs.toneDropdown) {
+                updateSelectedAttribute(this.$refs.toneDropdown, this.tone);
+            }
         },
         computed: {
             timingDisplay: function(){
@@ -161,6 +167,7 @@ document.addEventListener('DOMContentLoaded', function(){
                     '		q: ' + this.$options.filters.escape(this.inputText) + ',',
                     '		source: ' + this.$options.filters.escape(this.sourceLang) + ',',
                     '		target: ' + this.$options.filters.escape(this.targetLang) + ',',
+                    '		tone: ' + this.$options.filters.escape(this.tone) + ',',
                     '		format: "' + (this.isHtml ? "html" : "text") + '",',
                     //'		alternatives: 3,',
                     '		api_key: "' + this.apiKey + '"',
@@ -245,6 +252,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
                 this.updateQueryParam('source', this.sourceLang)
                 this.updateQueryParam('target', this.targetLang)
+                this.updateQueryParam('tone', this.tone)
                 this.updateQueryParam('q', this.inputText)
 
                 if (this.timeout) clearTimeout(this.timeout);
@@ -274,6 +282,7 @@ document.addEventListener('DOMContentLoaded', function(){
                     data.append("source", self.sourceLang);
                     data.append("target", self.targetLang);
                     data.append("format", self.isHtml ? "html" : "text");
+                    data.append("tone", self.tone);
                     //data.append("alternatives", 3);
                     data.append("api_key", self.apiKey);
                     data.append("enable_cleanup_reporting", "true");
@@ -507,6 +516,7 @@ function handleLangsResponse(self, response) {
 
         const sourceLanguage = self.langs.find(l => l.code === self.getQueryParam("source"))
         const targetLanguage = self.langs.find(l => l.code === self.getQueryParam("target"))
+        const toneQuery = self.getQueryParam("tone")
 
         if (sourceLanguage) {
             self.sourceLang = sourceLanguage.code
@@ -514,6 +524,10 @@ function handleLangsResponse(self, response) {
 
         if (targetLanguage) {
             self.targetLang = targetLanguage.code
+        }
+
+        if (toneQuery && ["neutral", "formal", "informal"].includes(toneQuery)) {
+            self.tone = toneQuery
         }
 
         const defaultText = self.getQueryParam("q")

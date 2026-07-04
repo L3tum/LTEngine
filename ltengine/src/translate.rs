@@ -118,6 +118,7 @@ pub async fn translate(
     let mut pb = PromptBuilder::new();
     pb.set_format(format);
     pb.set_target_language(tgt_lang.name);
+    pb.set_tone(body.tone.as_deref());
 
     let mut translated_texts = Vec::with_capacity(q.as_slice().len());
     let mut detected_languages = Vec::with_capacity(q.as_slice().len());

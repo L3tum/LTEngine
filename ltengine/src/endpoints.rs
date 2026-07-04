@@ -82,6 +82,7 @@ pub async fn get_frontend_settings(args: web::Data<Arc<Args>>) -> impl Responder
                 "name": "English"
             }
         },
+        "tone": ["neutral", "formal", "informal"],
         "suggestions": false,
         "supportedFilesFormat": []
     }))

@@ -76,6 +76,7 @@ pub struct TranslateRequest {
     pub source: Option<String>,
     pub target: Option<String>,
     pub format: Option<String>,
+    pub tone: Option<String>,
     pub api_key: Option<String>,
     pub alternatives: Option<u32>,
     pub enable_cleanup_reporting: Option<bool>,
@@ -89,6 +90,7 @@ pub struct MPTranslateRequest {
     pub source: Option<MPText<String>>,
     pub target: Option<MPText<String>>,
     pub format: Option<MPText<String>>,
+    pub tone: Option<MPText<String>>,
     pub api_key: Option<MPText<String>>,
     pub alternatives: Option<MPText<u32>>,
     pub enable_cleanup_reporting: Option<MPText<String>>,
@@ -108,6 +110,7 @@ impl MPTranslateRequest {
             source: self.source.map(|v| v.into_inner()),
             target: self.target.map(|v| v.into_inner()),
             format: self.format.map(|v| v.into_inner()),
+            tone: self.tone.map(|v| v.into_inner()),
             api_key: self.api_key.map(|v| v.into_inner()),
             alternatives: self.alternatives.map(|v| v.into_inner()),
             enable_cleanup_reporting: self
