@@ -329,16 +329,16 @@ pub(crate) async fn run_benchmark(
         total
     );
     println!(
-        "Whatlang Detection: accuracy = {:.1}% ({} / {}), Brier score = {:.4}",
+        "\nWhatlang Detection: accuracy = {:.1}% ({} / {}), Brier score = {:.4}",
         whatlang_acc * 100.0,
         whatlang_correct,
         total,
         whatlang_brier
     );
-    print!("{}", llm_stats);
+    println!("{}", llm_stats);
     // BLEU explanation
     println!(
-        "BLEU score: 0 = no overlap with reference, 1 = perfect match. Score is based on\nn-gram precision (up to 4-grams) with shortest reference length and smoothing."
+        "\nBLEU score: 0 = no overlap with reference, 1 = perfect match. Score is based on n-gram precision (up to 4-grams) with shortest reference length and smoothing."
     );
 
     // If HTML mode, also generate the HTML report file
