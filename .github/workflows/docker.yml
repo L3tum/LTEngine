@@ -17,7 +17,7 @@ jobs:
     steps:
       - id: push_check
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "release" ] && [ "$GITHUB_EVENT_ACTION" = "published" ]; then
+          if [ "${{github.event_name}}" = "release" ] && [ "${{github.event.action}}" = "published" ]; then
             echo "should_push=true"
             echo "should_push=true" >> "$GITHUB_OUTPUT"
           else
